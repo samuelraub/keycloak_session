@@ -18,6 +18,9 @@ module Dummy
     config.action_dispatch.show_exceptions = :none
     config.action_controller.allow_forgery_protection = false
     config.active_support.to_time_preserves_timezone = :zone
+    config.active_record.encryption.primary_key = "dummy-primary-key"
+    config.active_record.encryption.deterministic_key = "dummy-deterministic-key"
+    config.active_record.encryption.key_derivation_salt = "dummy-salt"
   end
 end
 
@@ -27,6 +30,8 @@ KeycloakSession.configure do |config|
   config.client_secret = "dummy-secret"
   config.redirect_uri = "http://www.example.com/auth/keycloak/callback"
   config.resolve_user = ->(claims) { User.find_by(oidc_id: claims["sub"]) }
+  # CI runs the suite a second time with plaintext tokens, the default.
+  config.encrypt_tokens = ENV["PLAINTEXT_TOKENS"].blank?
 end
 
 # Stands in for the handler of an app with a second OmniAuth provider.

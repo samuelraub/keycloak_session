@@ -15,6 +15,9 @@ module KeycloakSession
 
     attr_accessor :user_class
 
+    # Encrypts the stored tokens with Active Record encryption, which the app has to have keys for.
+    attr_accessor :encrypt_tokens
+
     # Called with the verified access token claims; returns the user to sign in, or nil to refuse.
     attr_accessor :resolve_user
 
@@ -27,6 +30,7 @@ module KeycloakSession
       @scopes = %i[openid email profile]
       @enabled = true
       @user_class = "User"
+      @encrypt_tokens = false
       @login_path = "/login"
       @after_login_path = "/"
     end
@@ -50,6 +54,17 @@ module KeycloakSession
 
       missing = REQUIRED.select { |name| public_send(name).blank? }
       raise ArgumentError, "KeycloakSession is missing: #{missing.join(", ")}" if missing.any?
+
+      validate_encryption! if encrypt_tokens
+    end
+
+    private
+
+    # Otherwise the first login fails, after the user has been to Keycloak and back.
+    def validate_encryption!
+      ActiveRecord::Encryption.encryptor.encrypt("probe")
+    rescue ActiveRecord::Encryption::Errors::Base => e
+      raise ArgumentError, "KeycloakSession encrypt_tokens needs Active Record encryption: #{e.message}"
     end
   end
 end

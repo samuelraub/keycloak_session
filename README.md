@@ -94,6 +94,19 @@ has_many :keycloak_token_sets, class_name: "KeycloakSession::TokenSet", dependen
 | `login_path` | `"/login"` | Where signed-out visitors go. |
 | `after_login_path` | `"/"` | |
 | `enabled` | `true` | False leaves the provider out of the middleware stack. |
+| `encrypt_tokens` | `false` | Encrypts the stored tokens, see below. |
+
+### Encrypting the stored tokens
+
+Access and refresh tokens are stored as they come. With `encrypt_tokens` they
+go through [Active Record encryption](https://guides.rubyonrails.org/active_record_encryption.html),
+so the app needs its keys set up (`bin/rails db:encryption:init`); without
+them it refuses to boot. Set it in the initializer, it is read once.
+
+Switching it on or off needs no migration. Token sets written the other way
+cannot be read, so their users sign in again and the old rows go with the
+usual cleanup. The same holds for a wrong key, and nothing is deleted: with
+the right key back, the sessions work again.
 
 ## Keycloak client
 

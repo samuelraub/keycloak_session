@@ -37,8 +37,8 @@ module KeycloakSession
 
       session.delete(KeycloakSession::SESSION_KEY)
       nil
-    rescue KeycloakSession::Unavailable
-      # Nobody is signed in for this request, but the session survives the outage.
+    rescue KeycloakSession::Unavailable, KeycloakSession::TokenSet::Unreadable
+      # Nobody is signed in for this request, but the session survives an outage or a wrong key.
       nil
     end
   end
