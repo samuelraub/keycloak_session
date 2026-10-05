@@ -14,9 +14,9 @@ module KeycloakSession
   # Tokens are really signed and really verified; only the HTTP calls to Keycloak are served
   # from memory.
   module TestHelpers
-    # Stands in for the realm: signs tokens and answers discovery, JWKS, refresh and logout.
+    # Stands in for the realm: signs tokens and answers discovery, JWKS and refresh.
     class FakeKeycloak
-      attr_reader :ended_refresh_tokens, :jwks_requests
+      attr_reader :jwks_requests, :logout_page
       # What the token endpoint answers a refresh with: a hash of tokens, or nil to refuse.
       attr_accessor :refreshed_tokens
 
@@ -29,7 +29,7 @@ module KeycloakSession
       def reset
         @down = false
         @refreshed_tokens = nil
-        @ended_refresh_tokens = []
+        @logout_page = false
         @jwks_requests = 0
         @signing_key = key(:default)
       end
@@ -38,6 +38,13 @@ module KeycloakSession
         @down = value
         # Back for good: the app would otherwise keep its distance for a moment longer.
         Client.new(config: @config).forget_outage unless value
+      end
+
+      # Whether discovery names a logout page. Off by default, so that signing out in a system
+      # test stays inside the app instead of sending the browser to a Keycloak that is not there.
+      def logout_page=(value)
+        @logout_page = value
+        Client.new(config: @config).clear_cache("discovery")
       end
 
       # Signs with a new key from now on, as Keycloak does after a rotation.
@@ -52,6 +59,12 @@ module KeycloakSession
 
       def access_token(sub: "test-subject", key: @signing_key, **claims)
         payload = {iss: @config.issuer, aud: @config.audience, sub: sub, exp: Time.now.to_i + 300}
+        sign(payload.merge(claims).compact, key)
+      end
+
+      def id_token(sub: "test-subject", key: @signing_key, **claims)
+        payload = {iss: @config.issuer, aud: @config.client_id, sub: sub, iat: Time.now.to_i,
+                   exp: Time.now.to_i + 300}
         sign(payload.merge(claims).compact, key)
       end
 
@@ -97,10 +110,6 @@ module KeycloakSession
           stub.post("#{base}/protocol/openid-connect/token") do
             @refreshed_tokens ? respond(@refreshed_tokens) : respond({error: "invalid_grant"}, status: 400)
           end
-          stub.post("#{base}/protocol/openid-connect/logout") do |env|
-            @ended_refresh_tokens << URI.decode_www_form(env.body).to_h["refresh_token"]
-            respond(nil, status: 204)
-          end
         end
       end
 
@@ -110,8 +119,8 @@ module KeycloakSession
           issuer: @config.issuer,
           jwks_uri: "#{endpoints}/certs",
           token_endpoint: "#{endpoints}/token",
-          end_session_endpoint: "#{endpoints}/logout"
-        }
+          end_session_endpoint: ("#{endpoints}/logout" if @logout_page)
+        }.compact
       end
 
       def respond(body, status: 200)
@@ -154,7 +163,8 @@ module KeycloakSession
         info: {email: email},
         credentials: {
           token: fake_keycloak.access_token(sub: sub, email: email, **claims),
-          refresh_token: fake_keycloak.refresh_token(sub: sub)
+          refresh_token: fake_keycloak.refresh_token(sub: sub),
+          id_token: fake_keycloak.id_token(sub: sub)
         }
       )
     end

@@ -17,7 +17,7 @@ module KeycloakSession
 
     belongs_to :user, class_name: KeycloakSession.config.user_class
 
-    encrypts :access_token, :refresh_token if KeycloakSession.config.encrypt_tokens
+    encrypts :access_token, :refresh_token, :id_token if KeycloakSession.config.encrypt_tokens
 
     validates :subject, :access_token, :refresh_token, presence: true
     before_save :set_expires_at, if: :refresh_token_changed?
@@ -44,11 +44,12 @@ module KeycloakSession
       false
     end
 
-    # Reaching Keycloak is best effort; the local row always goes.
-    def end_session
-      client.end_session(readable(:refresh_token))
+    # Drops the row and returns where the browser ends the session at Keycloak, or nil.
+    # Keycloak learns nothing unless the browser goes there.
+    def logout_url!
+      client.logout_url(readable(:id_token))
     rescue Unreadable
-      nil
+      client.logout_url(nil)
     ensure
       destroy
     end
@@ -71,7 +72,7 @@ module KeycloakSession
         return true if reload.access_token != seen
 
         tokens = client.refresh(readable(:refresh_token)) or return false
-        update!(access_token: tokens[:access_token], refresh_token: tokens[:refresh_token] || refresh_token)
+        update!(tokens.reverse_merge(refresh_token: refresh_token))
       ensure
         self.class.where(id: id).update_all(refreshing_until: nil)
       end
@@ -86,7 +87,7 @@ module KeycloakSession
     def readable(name)
       value = public_send(name)
       # Ciphertext is a JSON document, which no token is.
-      raise Unreadable, "#{name} is encrypted" if value.start_with?("{")
+      raise Unreadable, "#{name} is encrypted" if value&.start_with?("{")
 
       value
     rescue ActiveRecord::Encryption::Errors::Decryption

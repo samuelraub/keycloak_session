@@ -1,7 +1,7 @@
 # keycloak_session
 
 Keycloak login for Rails apps, as an engine: sign-in, a server-side token set
-per login, token refresh, logout at Keycloak and back-channel logout.
+per login, token refresh, logout through Keycloak and back-channel logout.
 
 The app keeps a config block, its user lookup and its login and logout
 buttons.
@@ -87,6 +87,7 @@ has_many :keycloak_token_sets, class_name: "KeycloakSession::TokenSet", dependen
 | `issuer` | required | The realm URL. Every endpoint is discovered from it. |
 | `client_id`, `client_secret` | required | A confidential client. |
 | `redirect_uri` | required | `https://<app>/auth/keycloak/callback` |
+| `post_logout_redirect_uri` | `login_path` on the host of `redirect_uri` | Where Keycloak sends the browser after a sign-out. |
 | `resolve_user` | required | Called with the verified access token claims. Returns the user, or nil to refuse. |
 | `audience` | `client_id` | The value that must be in `aud`. |
 | `scopes` | `openid email profile` | |
@@ -111,6 +112,7 @@ the right key back, the sessions work again.
 ## Keycloak client
 
 - Valid redirect URI: `https://<app>/auth/keycloak/callback`
+- Valid post logout redirect URI: `https://<app>/login`
 - Backchannel logout URL: `https://<app>/auth/backchannel-logout`
 - A client scope with an audience mapper for the client, as described above.
 
@@ -149,9 +151,13 @@ keycloak_sign_in(sub: user.oidc_id, aud: "account") # a user without access
 
 fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc")}
 fake_keycloak.down = true
-fake_keycloak.ended_refresh_tokens
 fake_keycloak.logout_token(sub: "abc")
+fake_keycloak.logout_page = true
 ```
+
+Signing out redirects the browser to Keycloak's logout page. The fake names
+none unless `logout_page` is set, so in tests a sign-out lands on
+`login_path` directly and a system test never leaves the app.
 
 ## Development
 

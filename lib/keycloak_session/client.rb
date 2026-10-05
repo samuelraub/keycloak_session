@@ -19,28 +19,27 @@ module KeycloakSession
     # After a request that got no answer, the next ones are skipped rather than left to time out
     # as well: during an outage every signed-in request would otherwise wait in turn.
     DOWN_FOR = 10
+    # A longer ID token is left out of the logout URL, which proxies cap at about 8k.
+    HINT_LIMIT = 4000
 
     def initialize(config: KeycloakSession.config)
       @config = config
     end
 
-    # Ends the Keycloak SSO session, so the next visit to the login page asks for credentials.
-    def end_session(refresh_token)
-      url = endpoint("end_session_endpoint")
-      return false unless url
+    # Where the browser ends the Keycloak SSO session, so the next visit to the login page asks
+    # for credentials. Nil when unknown. Without the ID token Keycloak has the user confirm.
+    def logout_url(id_token)
+      # Nothing would bring the browser back from a Keycloak that is down.
+      return if down?
 
-      res = post_form(url, refresh_token: refresh_token)
-      return true if res.success?
-
-      logger.error("Keycloak logout failed with status #{res.status}")
-      false
-    rescue => e
-      logger.error("Keycloak logout failed: #{e.class}: #{e.message}")
-      false
+      url = endpoint("end_session_endpoint") or return
+      params = {client_id: config.client_id, post_logout_redirect_uri: config.post_logout_redirect_uri}
+      params[:id_token_hint] = id_token if id_token.present? && id_token.bytesize <= HINT_LIMIT
+      "#{url}?#{URI.encode_www_form(params)}"
     end
 
     # The new tokens, or nil when Keycloak refuses. `refresh_token` is absent while the realm
-    # does not rotate them. Raises Unavailable when Keycloak gave no verdict.
+    # does not rotate them, `id_token` without the openid scope. Raises Unavailable when Keycloak gave no verdict.
     def refresh(refresh_token)
       url = endpoint("token_endpoint") or raise Unavailable, "no token_endpoint"
 
@@ -54,7 +53,7 @@ module KeycloakSession
       raise Unavailable, "status #{res.status}" unless res.success?
       raise Unavailable, "no access token, only: #{body.keys.join(", ")}" if body[:access_token].blank?
 
-      body.slice(:access_token, :refresh_token).compact_blank
+      body.slice(:access_token, :refresh_token, :id_token).compact_blank
     rescue => e
       logger.error("Keycloak token refresh failed: #{e.class}: #{e.message}")
       raise e.is_a?(Unavailable) ? e : Unavailable.new(e.message)
@@ -79,8 +78,9 @@ module KeycloakSession
     end
 
     # For tests: a fake that changes its keys would otherwise be judged by the cached set.
-    def clear_cache
-      %w[discovery jwks jwks-refetched down].each { |name| cache.delete(cache_key(name)) }
+    def clear_cache(*names)
+      names = %w[discovery jwks jwks-refetched down] if names.empty?
+      names.each { |name| cache.delete(cache_key(name)) }
       @jwks_document = nil
       remove_instance_variable(:@discovery) if defined?(@discovery)
     end

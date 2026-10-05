@@ -6,6 +6,12 @@ module KeycloakSession
   class Engine < ::Rails::Engine
     isolate_namespace KeycloakSession
 
+    # The logout redirect carries the ID token, and Rails logs where it redirects to.
+    initializer "keycloak_session.filter_id_token" do |app|
+      app.config.filter_parameters << :id_token_hint
+      app.config.filter_redirect << "id_token_hint="
+    end
+
     initializer "keycloak_session.omniauth" do |app|
       # The block runs when the stack is built, after the app's own initializers have configured us.
       app.middleware.use OmniAuth::Builder do

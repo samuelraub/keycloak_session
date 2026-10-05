@@ -9,6 +9,7 @@ module KeycloakSession
       auth = request.env["omniauth.auth"] or return refuse
       access_token = auth.dig("credentials", "token")
       refresh_token = auth.dig("credentials", "refresh_token")
+      id_token = auth.dig("credentials", "id_token")
       return refuse if access_token.blank? || refresh_token.blank?
 
       # Verified before the user is resolved: no account for realm users who may not use this client.
@@ -19,7 +20,7 @@ module KeycloakSession
       TokenSet.expired.delete_all
       token_set = TokenSet.create!(
         user: user, subject: claims["sub"], sid: claims["sid"],
-        access_token: access_token, refresh_token: refresh_token
+        access_token: access_token, refresh_token: refresh_token, id_token: id_token
       )
 
       reset_session
@@ -36,9 +37,12 @@ module KeycloakSession
     end
 
     def logout
-      TokenSet.find_by(id: session[SESSION_KEY])&.end_session if session[SESSION_KEY]
+      token_set = TokenSet.find_by(id: session[SESSION_KEY]) if session[SESSION_KEY]
       reset_session
-      redirect_to settings.login_path
+      # Through Keycloak, or the next sign-in would go through without credentials. That holds
+      # without a token set too: a refused refresh drops it and leaves Keycloak's session alone.
+      url = token_set ? token_set.logout_url! : Client.new.logout_url(nil)
+      redirect_to url || settings.login_path, allow_other_host: true
     end
 
     def backchannel_logout
