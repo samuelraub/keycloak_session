@@ -69,10 +69,20 @@ RSpec.describe KeycloakSession::Verifier do
       expect(fake_keycloak.jwks_requests).to eq(2)
     end
 
-    it "rejects the token when Keycloak is down" do
+    it "rejects a token without an expiry" do
+      rejects fake_keycloak.access_token(exp: nil)
+    end
+
+    it "rejects a header that is not an object" do
+      rejects "W10.e30.x"
+      rejects "bnVsbA.e30.x"
+    end
+
+    it "raises Unavailable when Keycloak is down, which is not a rejection" do
       fake_keycloak.down = true
 
-      rejects fake_keycloak.access_token
+      expect { verifier.decode_access_token(fake_keycloak.access_token) }
+        .to raise_error(KeycloakSession::Unavailable)
     end
   end
 
@@ -89,6 +99,14 @@ RSpec.describe KeycloakSession::Verifier do
       token = fake_keycloak.logout_token(nonce: "n")
 
       expect { verifier.decode_logout_token(token) }.to raise_error(JWT::DecodeError)
+    end
+
+    it "rejects a logout token without exp, iat or jti" do
+      %i[exp iat jti].each do |claim|
+        token = fake_keycloak.logout_token(claim => nil)
+
+        expect { verifier.decode_logout_token(token) }.to raise_error(JWT::DecodeError)
+      end
     end
 
     it "rejects a logout token minted for another audience" do

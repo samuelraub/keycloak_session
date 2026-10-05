@@ -6,7 +6,8 @@ require "uri"
 
 module KeycloakSession
   # Every request to Keycloak outside the login redirect. Total by contract: this runs on every
-  # authenticated request, so a failure comes back as false or nil instead of raising.
+  # authenticated request, so a failure comes back as false or nil instead of raising. The one
+  # exception is `refresh`, where an outage must not pass for a refusal.
   class Client
     # An unreachable Keycloak has to fail fast, or it ties up the app's threads.
     OPEN_TIMEOUT = 2
@@ -35,12 +36,14 @@ module KeycloakSession
       false
     end
 
-    # The new tokens, or nil. `refresh_token` is absent while the realm does not rotate them.
+    # The new tokens, or nil when Keycloak refuses. `refresh_token` is absent while the realm
+    # does not rotate them. Raises Unavailable when Keycloak gave no verdict.
     def refresh(refresh_token)
-      url = endpoint("token_endpoint")
-      return nil unless url
+      url = endpoint("token_endpoint") or raise Unavailable, "no token_endpoint"
 
       res = post_form(url, refresh_token: refresh_token, grant_type: "refresh_token")
+      raise Unavailable, "status #{res.status}" if res.status >= 500
+
       unless res.success?
         logger.error("Keycloak token refresh failed with status #{res.status}")
         return nil
@@ -51,9 +54,12 @@ module KeycloakSession
 
       logger.error("Keycloak token refresh returned no access token, only: #{body.keys.join(", ")}")
       nil
+    rescue Unavailable => e
+      logger.error("Keycloak token refresh failed: #{e.message}")
+      raise
     rescue => e
       logger.error("Keycloak token refresh failed: #{e.class}: #{e.message}")
-      nil
+      raise Unavailable, e.message
     end
 
     # The raw key set, or nil. `force` bypasses the cache after a key rotation.
@@ -71,6 +77,13 @@ module KeycloakSession
     rescue => e
       logger.error("Keycloak JWKS fetch failed: #{e.class}: #{e.message}")
       nil
+    end
+
+    # For tests: a fake that changes its keys would otherwise be judged by the cached set.
+    def clear_cache
+      %w[discovery jwks jwks-refetched].each { |name| cache.delete(cache_key(name)) }
+      @jwks_document = nil
+      remove_instance_variable(:@discovery) if defined?(@discovery)
     end
 
     private

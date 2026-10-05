@@ -18,13 +18,14 @@ module KeycloakSession
 
       TokenSet.expired.delete_all
       token_set = TokenSet.create!(
-        user: user, subject: claims["sub"], access_token: access_token, refresh_token: refresh_token
+        user: user, subject: claims["sub"], sid: claims["sid"],
+        access_token: access_token, refresh_token: refresh_token
       )
 
       reset_session
       session[SESSION_KEY] = token_set.id
       redirect_to settings.after_login_path
-    rescue JWT::DecodeError => e
+    rescue JWT::DecodeError, Unavailable => e
       settings.logger.warn("Keycloak login refused: #{e.message}")
       refuse
     end
@@ -44,11 +45,11 @@ module KeycloakSession
       response.headers["Cache-Control"] = "no-store"
 
       claims = Verifier.new.decode_logout_token(params[:logout_token])
-      return head(:bad_request) if claims["sub"].blank?
+      return head(:bad_request) if claims["sub"].blank? && claims["sid"].blank?
 
-      TokenSet.where(subject: claims["sub"]).destroy_all
+      logged_out(claims).destroy_all
       head :ok
-    rescue JWT::DecodeError => e
+    rescue JWT::DecodeError, Unavailable => e
       settings.logger.warn("Keycloak logout token refused: #{e.message}")
       head :bad_request
     end
@@ -56,6 +57,16 @@ module KeycloakSession
     private
 
     def settings = KeycloakSession.config
+
+    # A token with a `sid` ends that one Keycloak session; without, all of the subject's.
+    def logged_out(claims)
+      sid, sub = claims.values_at("sid", "sub")
+      return TokenSet.where(subject: sub) if sid.blank?
+
+      # Rows without a sid cannot be told apart, so they go with their subject.
+      scope = TokenSet.where(sid: sid)
+      sub.present? ? scope.or(TokenSet.where(sid: nil, subject: sub)) : scope
+    end
 
     def refuse
       redirect_to settings.login_path, alert: I18n.t("keycloak_session.login_failed", default: "Sign-in failed.")

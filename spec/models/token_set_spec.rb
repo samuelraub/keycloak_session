@@ -32,6 +32,39 @@ RSpec.describe KeycloakSession::TokenSet do
       expect(described_class.exists?(token_set.id)).to be(false)
     end
 
+    it "raises Unavailable and keeps the token set when Keycloak is down" do
+      fake_keycloak.down = true
+
+      expect { token_set.refresh }.to raise_error(KeycloakSession::Unavailable)
+      expect(token_set.reload.changed?).to be(false)
+    end
+
+    it "keeps the new tokens when they cannot be verified during an outage" do
+      fresh = {access_token: fake_keycloak.access_token(sub: "abc"), refresh_token: fake_keycloak.refresh_token}
+      fake_keycloak.refreshed_tokens = fresh
+      allow_any_instance_of(KeycloakSession::Verifier).to receive(:decode_access_token)
+        .and_raise(KeycloakSession::Unavailable)
+
+      expect { token_set.refresh }.to raise_error(KeycloakSession::Unavailable)
+      expect(token_set.reload).to have_attributes(fresh)
+    end
+
+    it "does not spend the refresh token again after a parallel request refreshed" do
+      late = described_class.find(token_set.id)
+      fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc", jti: "fresh")}
+      token_set.refresh
+      fake_keycloak.refreshed_tokens = nil
+
+      expect(late.refresh).to be(true)
+      expect(late.access_token).to eq(token_set.access_token)
+    end
+
+    it "is false when the token set was dropped in the meantime" do
+      described_class.find(token_set.id).destroy
+
+      expect(token_set.refresh).to be(false)
+    end
+
     it "keeps the token set untouched when the refresh itself fails" do
       expect(token_set.refresh).to be(false)
       expect(token_set.reload.changed?).to be(false)
@@ -41,6 +74,12 @@ RSpec.describe KeycloakSession::TokenSet do
   describe "#access_token_valid?" do
     it "returns the claims of a valid token" do
       expect(token_set.access_token_valid?).to include("sub" => "abc")
+    end
+
+    it "raises Unavailable when Keycloak is down" do
+      fake_keycloak.down = true
+
+      expect { token_set.access_token_valid? }.to raise_error(KeycloakSession::Unavailable)
     end
 
     it "is false for a token that does not decode, rather than raising" do

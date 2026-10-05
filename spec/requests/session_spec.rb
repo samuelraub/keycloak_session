@@ -69,6 +69,12 @@ RSpec.describe "Keycloak session", type: :request do
       expect(response).to redirect_to("/login")
     end
 
+    it "hands the failure of another provider to the app's own handler" do
+      strategy = instance_double(OmniAuth::Strategies::OpenIDConnect, name: "other")
+
+      expect(OmniAuth.config.on_failure.call("omniauth.error.strategy" => strategy).first).to eq(418)
+    end
+
     it "clears out expired token sets of earlier logins" do
       keycloak_sign_in(sub: "abc")
       token_sets.last.update_columns(expires_at: 1.minute.ago)
@@ -105,6 +111,17 @@ RSpec.describe "Keycloak session", type: :request do
       expect(response).to redirect_to("/login")
     end
 
+    it "keeps the session through an outage of Keycloak" do
+      fake_keycloak.down = true
+      get "/"
+      expect(response).to redirect_to("/login")
+
+      fake_keycloak.down = false
+      fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc")}
+      get "/"
+      expect(response.body).to eq("Hello a@example.test")
+    end
+
     it "signs the visitor out and drops the token set when the audience is gone" do
       fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc", aud: "account")}
 
@@ -112,6 +129,20 @@ RSpec.describe "Keycloak session", type: :request do
 
       expect(response).to redirect_to("/login")
       expect(token_sets.count).to eq(0)
+    end
+  end
+
+  describe "an outage of Keycloak with a cold key cache" do
+    it "keeps the session of a visitor whose token is still good" do
+      keycloak_sign_in(sub: "abc")
+      KeycloakSession::Client.new.clear_cache
+      fake_keycloak.down = true
+      get "/"
+      expect(response).to redirect_to("/login")
+
+      fake_keycloak.down = false
+      get "/"
+      expect(response.body).to eq("Hello a@example.test")
     end
   end
 
@@ -165,6 +196,45 @@ RSpec.describe "Keycloak session", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.headers["Cache-Control"]).to eq("no-store")
       expect(token_sets.count).to eq(0)
+    end
+
+    it "drops only the token set of the session a sid names" do
+      token_sets.delete_all
+      keycloak_sign_in(sub: "abc", sid: "laptop")
+      keycloak_sign_in(sub: "abc", sid: "phone")
+
+      post "/auth/backchannel-logout", params: {logout_token: fake_keycloak.logout_token(sub: "abc", sid: "phone")}
+
+      expect(response).to have_http_status(:ok)
+      expect(token_sets.pluck(:sid)).to eq(["laptop"])
+    end
+
+    it "accepts a token that carries a sid and no subject" do
+      token_sets.delete_all
+      keycloak_sign_in(sub: "abc", sid: "laptop")
+
+      post "/auth/backchannel-logout", params: {logout_token: fake_keycloak.logout_token(sub: nil, sid: "laptop")}
+
+      expect(response).to have_http_status(:ok)
+      expect(token_sets.count).to eq(0)
+    end
+
+    it "drops the subject's token sets that have no sid along with the named session" do
+      post "/auth/backchannel-logout", params: {logout_token: fake_keycloak.logout_token(sub: "abc", sid: "phone")}
+
+      expect(token_sets.count).to eq(0)
+    end
+
+    it "answers 400 to a token with neither subject nor sid" do
+      post "/auth/backchannel-logout", params: {logout_token: fake_keycloak.logout_token(sub: nil)}
+
+      expect(response).to have_http_status(:bad_request)
+    end
+
+    it "answers 400 to a token whose header is not an object" do
+      post "/auth/backchannel-logout", params: {logout_token: "W10.e30.x"}
+
+      expect(response).to have_http_status(:bad_request)
     end
 
     it "leaves other subjects alone" do

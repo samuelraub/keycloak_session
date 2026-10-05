@@ -15,24 +15,23 @@ module KeycloakSession
 
     scope :expired, -> { where(expires_at: ...Time.current).or(where(updated_at: ...STALE_AFTER.ago)) }
 
-    # The claims, or false.
+    # The claims, or false. Raises Unavailable while Keycloak's keys cannot be fetched.
     def access_token_valid?
       verifier.decode_access_token(access_token)
     rescue JWT::DecodeError
       false
     end
 
+    # False when Keycloak refuses; raises Unavailable when it could not be asked.
     def refresh
-      tokens = client.refresh(refresh_token)
-      return false unless tokens
-
-      self.access_token = tokens[:access_token]
-      self.refresh_token = tokens[:refresh_token] || refresh_token
+      return false unless renew_tokens
 
       # Keycloak keeps refreshing for a user whose role is gone and only drops the audience.
-      return save if access_token_valid?
+      return true if access_token_valid?
 
       destroy
+      false
+    rescue ActiveRecord::RecordNotFound
       false
     end
 
@@ -43,6 +42,19 @@ module KeycloakSession
     end
 
     private
+
+    # Locked, because a rotating realm takes a second use of a refresh token for theft.
+    # Saved before the new access token is verified, so an outage there cannot lose the pair.
+    def renew_tokens
+      seen = access_token
+      with_lock do
+        # A parallel request was first; its tokens are the current ones.
+        next true if access_token != seen
+
+        tokens = client.refresh(refresh_token) or next false
+        update!(access_token: tokens[:access_token], refresh_token: tokens[:refresh_token] || refresh_token)
+      end
+    end
 
     # Unverified on purpose: Keycloak signs refresh tokens with a key it does not publish, and
     # the date only feeds the cleanup. Offline tokens carry no `exp`.

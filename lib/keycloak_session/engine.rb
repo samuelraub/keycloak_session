@@ -10,6 +10,7 @@ module KeycloakSession
       # The block runs when the stack is built, after the app's own initializers have configured us.
       app.middleware.use OmniAuth::Builder do
         config = KeycloakSession.config
+        config.validate!
         next unless config.enabled
 
         issuer = URI(config.issuer)
@@ -31,12 +32,16 @@ module KeycloakSession
     end
 
     config.after_initialize do
-      KeycloakSession.config.validate!
       next unless KeycloakSession.config.enabled
 
       OmniAuth.config.logger = KeycloakSession.config.logger
-      # Development would raise instead of landing on our failure action.
-      OmniAuth.config.on_failure = proc { |env| OmniAuth::FailureEndpoint.new(env).redirect_to_failure }
+      # Development would raise instead of landing on our failure action. Other providers keep
+      # the handler the app gave them.
+      host_failure = OmniAuth.config.on_failure
+      OmniAuth.config.on_failure = proc do |env|
+        ours = env["omniauth.error.strategy"]&.name.to_s == KeycloakSession::PROVIDER.to_s
+        ours ? OmniAuth::FailureEndpoint.new(env).redirect_to_failure : host_failure.call(env)
+      end
     end
   end
 end

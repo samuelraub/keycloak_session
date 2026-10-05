@@ -26,8 +26,5 @@ RSpec.configure do |config|
 
   config.include KeycloakSession::TestHelpers
 
-  config.before do
-    KeycloakSession::TestHelpers.reset
-    Rails.cache.clear
-  end
+  config.before { KeycloakSession::TestHelpers.reset }
 end
