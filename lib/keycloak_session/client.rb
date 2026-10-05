@@ -16,6 +16,9 @@ module KeycloakSession
     CACHE_TTL = 12 * 60 * 60
     # Unknown key ids come from unauthenticated callers too, so a forced refetch is rationed.
     REFETCH_INTERVAL = 60
+    # After a request that got no answer, the next ones are skipped rather than left to time out
+    # as well: during an outage every signed-in request would otherwise wait in turn.
+    DOWN_FOR = 10
 
     def initialize(config: KeycloakSession.config)
       @config = config
@@ -42,29 +45,25 @@ module KeycloakSession
       url = endpoint("token_endpoint") or raise Unavailable, "no token_endpoint"
 
       res = post_form(url, refresh_token: refresh_token, grant_type: "refresh_token")
-      raise Unavailable, "status #{res.status}" if res.status >= 500
-
-      unless res.success?
-        logger.error("Keycloak token refresh failed with status #{res.status}")
+      body = JSON.parse(res.body, symbolize_names: true)
+      # The one answer that judges the refresh token. A wrong client secret or a rate limit does not.
+      if res.status == 400 && body[:error] == "invalid_grant"
+        logger.warn("Keycloak refused the token refresh: #{body[:error_description]}")
         return nil
       end
+      raise Unavailable, "status #{res.status}" unless res.success?
+      raise Unavailable, "no access token, only: #{body.keys.join(", ")}" if body[:access_token].blank?
 
-      body = JSON.parse(res.body, symbolize_names: true)
-      return body.slice(:access_token, :refresh_token) if body[:access_token]
-
-      logger.error("Keycloak token refresh returned no access token, only: #{body.keys.join(", ")}")
-      nil
-    rescue Unavailable => e
-      logger.error("Keycloak token refresh failed: #{e.message}")
-      raise
+      body.slice(:access_token, :refresh_token).compact_blank
     rescue => e
       logger.error("Keycloak token refresh failed: #{e.class}: #{e.message}")
-      raise Unavailable, e.message
+      raise e.is_a?(Unavailable) ? e : Unavailable.new(e.message)
     end
 
-    # The raw key set, or nil. `force` bypasses the cache after a key rotation.
+    # The raw key set, or nil. `force` bypasses the cache after a key rotation, and is nil while
+    # rationed: a key missing from the cached set may exist all the same.
     def jwks_document(force: false)
-      force &&= refetch_allowed?
+      return nil if force && !refetch_allowed?
       return @jwks_document if @jwks_document && !force
 
       @jwks_document = cache.fetch(cache_key("jwks"), expires_in: CACHE_TTL, force: force) do
@@ -81,9 +80,14 @@ module KeycloakSession
 
     # For tests: a fake that changes its keys would otherwise be judged by the cached set.
     def clear_cache
-      %w[discovery jwks jwks-refetched].each { |name| cache.delete(cache_key(name)) }
+      %w[discovery jwks jwks-refetched down].each { |name| cache.delete(cache_key(name)) }
       @jwks_document = nil
       remove_instance_variable(:@discovery) if defined?(@discovery)
+    end
+
+    # For tests: Keycloak is back before DOWN_FOR is over.
+    def forget_outage
+      cache.delete(cache_key("down"))
     end
 
     private
@@ -106,15 +110,38 @@ module KeycloakSession
     end
 
     def refetch_allowed?
-      return false if cache.read(cache_key("jwks-refetched"))
+      cache.write(cache_key("jwks-refetched"), true, expires_in: REFETCH_INTERVAL, unless_exist: true)
+    end
 
-      cache.write(cache_key("jwks-refetched"), true, expires_in: REFETCH_INTERVAL)
-      true
+    def request
+      raise Faraday::Error, "skipped, Keycloak did not answer a moment ago" if down?
+
+      begin
+        res = yield
+      rescue Faraday::Error
+        down!
+        raise
+      end
+      down! if res.status >= 500
+      res
+    end
+
+    # The marker is a courtesy; a cache that fails must not add to the trouble.
+    def down?
+      cache.read(cache_key("down"))
+    rescue
+      false
+    end
+
+    def down!
+      cache.write(cache_key("down"), true, expires_in: DOWN_FOR)
+    rescue
+      nil
     end
 
     # Raises, so a failed fetch leaves the surrounding cache block without writing anything.
     def get!(url)
-      res = connection.get(url)
+      res = request { connection.get(url) }
       raise Faraday::Error, "status #{res.status}" unless res.success?
 
       res
@@ -122,9 +149,11 @@ module KeycloakSession
 
     def post_form(url, params)
       credentials = {client_id: config.client_id, client_secret: config.client_secret}
-      connection.post(url) do |req|
-        req.headers["Content-Type"] = "application/x-www-form-urlencoded"
-        req.body = URI.encode_www_form(credentials.merge(params))
+      request do
+        connection.post(url) do |req|
+          req.headers["Content-Type"] = "application/x-www-form-urlencoded"
+          req.body = URI.encode_www_form(credentials.merge(params))
+        end
       end
     end
 

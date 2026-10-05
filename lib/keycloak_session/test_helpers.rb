@@ -19,7 +19,6 @@ module KeycloakSession
       attr_reader :ended_refresh_tokens, :jwks_requests
       # What the token endpoint answers a refresh with: a hash of tokens, or nil to refuse.
       attr_accessor :refreshed_tokens
-      attr_writer :down
 
       def initialize(config: KeycloakSession.config)
         @config = config
@@ -33,6 +32,12 @@ module KeycloakSession
         @ended_refresh_tokens = []
         @jwks_requests = 0
         @signing_key = key(:default)
+      end
+
+      def down=(value)
+        @down = value
+        # Back for good: the app would otherwise keep its distance for a moment longer.
+        Client.new(config: @config).forget_outage unless value
       end
 
       # Signs with a new key from now on, as Keycloak does after a rotation.

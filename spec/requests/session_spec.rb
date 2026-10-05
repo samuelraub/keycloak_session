@@ -146,6 +146,22 @@ RSpec.describe "Keycloak session", type: :request do
     end
   end
 
+  describe "a token set that cannot be decrypted", if: KeycloakSession.config.encrypt_tokens do
+    it "keeps the session, in case it is the key that is wrong" do
+      keycloak_sign_in(sub: "abc")
+      row = token_sets.where(id: token_sets.last.id)
+      good = token_sets.connection.select_one("SELECT access_token FROM #{token_sets.table_name}")["access_token"]
+
+      row.update_all("access_token = 'plain'")
+      get "/"
+      expect(response).to redirect_to("/login")
+
+      row.update_all(["access_token = ?", good])
+      get "/"
+      expect(response.body).to eq("Hello a@example.test")
+    end
+  end
+
   describe "signing out" do
     before { keycloak_sign_in(sub: "abc") }
 

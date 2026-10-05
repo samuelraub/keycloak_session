@@ -33,10 +33,16 @@ RSpec.describe KeycloakSession::Client do
       expect(client.refresh("old")).to be_nil
     end
 
-    it "reports a failure when a 200 carries no access token" do
-      fake_keycloak.refreshed_tokens = {id_token: "i"}
+    it "raises Unavailable when a 200 carries no access token" do
+      fake_keycloak.refreshed_tokens = {access_token: "", id_token: "i"}
 
-      expect(client.refresh("old")).to be_nil
+      expect { client.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
+    end
+
+    it "leaves out a blank refresh token" do
+      fake_keycloak.refreshed_tokens = {access_token: "a", refresh_token: ""}
+
+      expect(client.refresh("old")).to eq(access_token: "a")
     end
 
     it "raises Unavailable when Keycloak is down, which is not a refusal" do
@@ -45,10 +51,40 @@ RSpec.describe KeycloakSession::Client do
       expect { client.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
     end
 
-    it "raises Unavailable on a server error" do
-      allow(client).to receive(:post_form).and_return(instance_double(Faraday::Response, status: 503))
+    it "raises Unavailable on any answer that does not judge the refresh token" do
+      answers = [[503, "{}"], [429, "{}"], [401, '{"error":"invalid_client"}'],
+        [400, '{"error":"invalid_client"}'], [404, "<html>"]]
+      answers.each do |status, body|
+        response = instance_double(Faraday::Response, status: status, body: body, success?: false)
+        allow(client).to receive(:post_form).and_return(response)
 
+        expect { client.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
+      end
+    end
+  end
+
+  describe "after a request Keycloak did not answer" do
+    include ActiveSupport::Testing::TimeHelpers
+
+    before do
+      client.jwks_document
+      fake_keycloak.down = true
       expect { client.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
+    end
+
+    it "skips the next requests instead of waiting for each to time out" do
+      expect(KeycloakSession.config.connection).not_to receive(:post)
+
+      expect { described_class.new.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
+      expect(described_class.new.end_session("old")).to be(false)
+    end
+
+    it "tries again a moment later" do
+      travel(described_class::DOWN_FOR + 1) do
+        expect(KeycloakSession.config.connection).to receive(:post).and_call_original
+
+        expect { described_class.new.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
+      end
     end
   end
 
@@ -75,8 +111,8 @@ RSpec.describe KeycloakSession::Client do
     it "refetches when forced, but only once a minute" do
       client.jwks_document
       described_class.new.jwks_document(force: true)
-      described_class.new.jwks_document(force: true)
 
+      expect(described_class.new.jwks_document(force: true)).to be_nil
       expect(fake_keycloak.jwks_requests).to eq(2)
     end
 

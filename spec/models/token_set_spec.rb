@@ -10,6 +10,51 @@ RSpec.describe KeycloakSession::TokenSet do
     )
   end
 
+  describe "encrypted tokens", if: KeycloakSession.config.encrypt_tokens do
+    # Raw SQL, because `update_all` would encrypt.
+    def store_plaintext
+      described_class.where(id: token_set.id).update_all("access_token = 'plain', refresh_token = 'plain'")
+      token_set.reload
+    end
+
+    it "keeps neither token readable in the table" do
+      raw = described_class.connection.select_one("SELECT access_token, refresh_token FROM #{described_class.table_name}")
+
+      expect(raw["access_token"]).not_to include(token_set.access_token)
+      expect(raw["refresh_token"]).not_to include(token_set.refresh_token)
+      expect(token_set.reload.access_token_valid?).to include("sub" => "abc")
+    end
+
+    it "cannot read a row from before encryption, and leaves it alone" do
+      store_plaintext
+
+      expect { token_set.access_token_valid? }.to raise_error(described_class::Unreadable)
+      expect { token_set.refresh }.to raise_error(described_class::Unreadable)
+      expect(described_class.exists?(token_set.id)).to be(true)
+    end
+
+    it "still drops such a row on sign-out, without bothering Keycloak" do
+      store_plaintext
+
+      token_set.end_session
+
+      expect(fake_keycloak.ended_refresh_tokens).to be_empty
+      expect(described_class.exists?(token_set.id)).to be(false)
+    end
+  end
+
+  describe "plaintext tokens", unless: KeycloakSession.config.encrypt_tokens do
+    before { token_set.update_columns(access_token: '{"p":"x"}', refresh_token: '{"p":"y"}') }
+
+    it "does not hand ciphertext from an encrypted past to Keycloak" do
+      fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc")}
+
+      expect { token_set.refresh }.to raise_error(described_class::Unreadable)
+      token_set.end_session
+      expect(fake_keycloak.ended_refresh_tokens).to be_empty
+    end
+  end
+
   describe "#refresh" do
     it "stores the tokens Keycloak sends back" do
       fresh = {access_token: fake_keycloak.access_token(sub: "abc"), refresh_token: fake_keycloak.refresh_token}
@@ -57,6 +102,33 @@ RSpec.describe KeycloakSession::TokenSet do
 
       expect(late.refresh).to be(true)
       expect(late.access_token).to eq(token_set.access_token)
+    end
+
+    it "waits for a refresh in progress and takes its tokens" do
+      fresh = fake_keycloak.access_token(sub: "abc", jti: "fresh")
+      token_set.update_columns(refreshing_until: 10.seconds.from_now)
+      allow(token_set).to receive(:sleep) do
+        described_class.where(id: token_set.id).update_all(access_token: fresh, refreshing_until: nil)
+      end
+
+      expect(token_set.refresh).to be(true)
+      expect(token_set.access_token).to eq(fresh)
+    end
+
+    it "takes over from a refresh that never finished" do
+      token_set.update_columns(refreshing_until: 1.second.ago)
+      fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc", jti: "fresh")}
+
+      expect(token_set.refresh).to be(true)
+    end
+
+    it "gives up its claim whatever the outcome" do
+      token_set.refresh
+      expect(token_set.reload.refreshing_until).to be_nil
+
+      fake_keycloak.down = true
+      expect { token_set.refresh }.to raise_error(KeycloakSession::Unavailable)
+      expect(token_set.reload.refreshing_until).to be_nil
     end
 
     it "is false when the token set was dropped in the meantime" do

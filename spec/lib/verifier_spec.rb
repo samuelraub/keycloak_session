@@ -78,6 +78,15 @@ RSpec.describe KeycloakSession::Verifier do
       rejects "bnVsbA.e30.x"
     end
 
+    it "raises Unavailable for a rotated key it may not look up yet" do
+      verifier.decode_access_token(fake_keycloak.access_token)
+      rejects fake_keycloak.access_token(key: fake_keycloak.foreign_key)
+      fake_keycloak.rotate_key!
+
+      expect { described_class.new.decode_access_token(fake_keycloak.access_token) }
+        .to raise_error(KeycloakSession::Unavailable)
+    end
+
     it "raises Unavailable when Keycloak is down, which is not a rejection" do
       fake_keycloak.down = true
 
