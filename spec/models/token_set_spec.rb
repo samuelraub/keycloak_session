@@ -6,14 +6,16 @@ RSpec.describe KeycloakSession::TokenSet do
     described_class.create!(
       user: user, subject: "abc",
       access_token: fake_keycloak.access_token(sub: "abc"),
-      refresh_token: fake_keycloak.refresh_token(sub: "abc")
+      refresh_token: fake_keycloak.refresh_token(sub: "abc"),
+      id_token: fake_keycloak.id_token(sub: "abc")
     )
   end
 
   describe "encrypted tokens", if: KeycloakSession.config.encrypt_tokens do
     # Raw SQL, because `update_all` would encrypt.
     def store_plaintext
-      described_class.where(id: token_set.id).update_all("access_token = 'plain', refresh_token = 'plain'")
+      described_class.where(id: token_set.id)
+        .update_all("access_token = 'plain', refresh_token = 'plain', id_token = 'plain'")
       token_set.reload
     end
 
@@ -33,41 +35,43 @@ RSpec.describe KeycloakSession::TokenSet do
       expect(described_class.exists?(token_set.id)).to be(true)
     end
 
-    it "still drops such a row on sign-out, without bothering Keycloak" do
+    it "still drops such a row on sign-out, and goes to Keycloak without the hint" do
+      fake_keycloak.logout_page = true
       store_plaintext
 
-      token_set.end_session
-
-      expect(fake_keycloak.ended_refresh_tokens).to be_empty
+      expect(token_set.logout_url!).not_to include("id_token_hint")
       expect(described_class.exists?(token_set.id)).to be(false)
     end
   end
 
   describe "plaintext tokens", unless: KeycloakSession.config.encrypt_tokens do
-    before { token_set.update_columns(access_token: '{"p":"x"}', refresh_token: '{"p":"y"}') }
+    before do
+      token_set.update_columns(access_token: '{"p":"x"}', refresh_token: '{"p":"y"}', id_token: '{"p":"z"}')
+    end
 
     it "does not hand ciphertext from an encrypted past to Keycloak" do
+      fake_keycloak.logout_page = true
       fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc")}
 
       expect { token_set.refresh }.to raise_error(described_class::Unreadable)
-      token_set.end_session
-      expect(fake_keycloak.ended_refresh_tokens).to be_empty
+      expect(token_set.logout_url!).not_to include("id_token_hint")
     end
   end
 
   describe "#refresh" do
     it "stores the tokens Keycloak sends back" do
-      fresh = {access_token: fake_keycloak.access_token(sub: "abc"), refresh_token: fake_keycloak.refresh_token}
+      fresh = {access_token: fake_keycloak.access_token(sub: "abc"), refresh_token: fake_keycloak.refresh_token,
+               id_token: fake_keycloak.id_token(sub: "abc", jti: "fresh")}
       fake_keycloak.refreshed_tokens = fresh
 
       expect(token_set.refresh).to be(true)
       expect(token_set.reload).to have_attributes(fresh)
     end
 
-    it "keeps the refresh token it has when Keycloak does not rotate it" do
+    it "keeps the refresh and ID token it has when Keycloak sends neither" do
       fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc")}
 
-      expect { token_set.refresh }.not_to change { token_set.reload.refresh_token }
+      expect { token_set.refresh }.not_to change { token_set.reload.values_at(:refresh_token, :id_token) }
     end
 
     it "rejects a refreshed token without the audience and drops the token set" do
@@ -161,18 +165,30 @@ RSpec.describe KeycloakSession::TokenSet do
     end
   end
 
-  describe "#end_session" do
-    it "ends the session at Keycloak and drops the row" do
-      token_set.end_session
+  describe "#logout_url!" do
+    it "drops the row and returns Keycloak's logout page, with the ID token as the hint" do
+      fake_keycloak.logout_page = true
 
-      expect(fake_keycloak.ended_refresh_tokens).to eq([token_set.refresh_token])
+      expect(token_set.logout_url!).to include("id_token_hint=#{token_set.id_token}")
       expect(described_class.exists?(token_set.id)).to be(false)
     end
 
-    it "drops the row even when Keycloak is down" do
+    it "goes without the hint for a login from before ID tokens were stored" do
+      fake_keycloak.logout_page = true
+      token_set.update_columns(id_token: nil)
+
+      url = token_set.logout_url!
+
+      expect(url).to include("/logout?")
+      expect(url).not_to include("id_token_hint")
+    end
+
+    it "drops the row and returns nothing when Keycloak is down" do
+      fake_keycloak.logout_page = true
       fake_keycloak.down = true
 
-      expect { token_set.end_session }.to change(described_class, :count).from(1).to(0)
+      expect(token_set.logout_url!).to be_nil
+      expect(described_class.count).to eq(0)
     end
   end
 

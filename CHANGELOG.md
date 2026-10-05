@@ -4,6 +4,19 @@
 
 Run `bin/rails keycloak_session:install:migrations db:migrate` after upgrading.
 
+- Signing out redirects the browser to Keycloak's logout page (RP-initiated
+  logout) with the stored ID token as `id_token_hint`, instead of posting the
+  refresh token to it, a legacy format Keycloak advises against. Register
+  `post_logout_redirect_uri` (default: `login_path`) with the client as a
+  valid post logout redirect URI.
+  - The sign-out button has to be a plain form post (`data: {turbo: false}`):
+    Turbo and fetch cannot follow the redirect to Keycloak.
+  - `TokenSet#end_session` is now `logout_url!`: it drops the row and returns
+    the URL, and no longer tells Keycloak anything itself. `Client#end_session`
+    is gone, and nothing replaces it for ending a session from the server.
+  - `fake_keycloak.ended_refresh_tokens` is gone; `fake_keycloak.logout_page`
+    switches the redirect on in tests.
+
 - `encrypt_tokens` stores the tokens through Active Record encryption.
 - An unreachable Keycloak no longer ends sessions. `Client#refresh` and the
   verifier raise `KeycloakSession::Unavailable` instead of reporting a refusal.

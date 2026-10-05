@@ -7,7 +7,7 @@ module KeycloakSession
     # The realm URL, e.g. https://kc.example.com/realms/main. Every endpoint is discovered from it.
     attr_accessor :issuer
     attr_accessor :client_id, :client_secret, :redirect_uri
-    attr_writer :audience, :cache, :logger
+    attr_writer :audience, :cache, :logger, :post_logout_redirect_uri
     attr_accessor :scopes
 
     # False keeps the provider out of the middleware stack, for apps that also have another login.
@@ -41,6 +41,11 @@ module KeycloakSession
       @audience || client_id
     end
 
+    # Where Keycloak sends the browser after a sign-out. Has to be registered with the client.
+    def post_logout_redirect_uri
+      @post_logout_redirect_uri || URI.join(redirect_uri, login_path).to_s
+    end
+
     def cache
       @cache || Rails.cache
     end
@@ -56,9 +61,17 @@ module KeycloakSession
       raise ArgumentError, "KeycloakSession is missing: #{missing.join(", ")}" if missing.any?
 
       validate_encryption! if encrypt_tokens
+      validate_post_logout_redirect_uri!
     end
 
     private
+
+    # Otherwise every sign-out fails, after the session is gone.
+    def validate_post_logout_redirect_uri!
+      post_logout_redirect_uri
+    rescue URI::Error => e
+      raise ArgumentError, "KeycloakSession cannot derive post_logout_redirect_uri: #{e.message}"
+    end
 
     # Otherwise the first login fails, after the user has been to Keycloak and back.
     def validate_encryption!

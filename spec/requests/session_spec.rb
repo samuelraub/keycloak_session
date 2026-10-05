@@ -21,7 +21,7 @@ RSpec.describe "Keycloak session", type: :request do
 
       get "/"
       expect(response.body).to eq("Hello a@example.test")
-      expect(token_sets.last).to have_attributes(user_id: user.id, subject: "abc")
+      expect(token_sets.last).to have_attributes(user_id: user.id, subject: "abc", id_token: be_present)
     end
 
     it "refuses a token without the audience before resolving the user" do
@@ -165,24 +165,56 @@ RSpec.describe "Keycloak session", type: :request do
   describe "signing out" do
     before { keycloak_sign_in(sub: "abc") }
 
-    it "ends the session here and at Keycloak" do
-      refresh_token = token_sets.last.refresh_token
+    it "ends the session here and sends the browser to Keycloak to end it there" do
+      fake_keycloak.logout_page = true
+      id_token = token_sets.last.id_token
 
       post "/auth/logout"
 
-      expect(response).to redirect_to("/login")
-      expect(fake_keycloak.ended_refresh_tokens).to eq([refresh_token])
+      expect(response.location).to start_with("https://kc.example.test/realms/test/protocol/openid-connect/logout?")
+      expect(Rack::Utils.parse_query(URI(response.location).query)).to eq(
+        "client_id" => "dummy", "id_token_hint" => id_token,
+        "post_logout_redirect_uri" => "http://www.example.com/login"
+      )
       expect(token_sets.count).to eq(0)
       get "/"
       expect(response).to redirect_to("/login")
     end
 
-    it "signs the visitor out locally even when Keycloak cannot be reached" do
-      fake_keycloak.down = true
+    it "keeps the ID token out of the log line about the redirect" do
+      fake_keycloak.logout_page = true
 
       post "/auth/logout"
 
+      expect(response.filtered_location).not_to include(response.location.split("id_token_hint=").last)
+    end
+
+    it "signs the visitor out locally when Keycloak names no logout page" do
+      post "/auth/logout"
+
+      expect(response).to redirect_to("/login")
       expect(token_sets.count).to eq(0)
+    end
+
+    it "signs the visitor out locally during an outage of Keycloak" do
+      fake_keycloak.logout_page = true
+      fake_keycloak.down = true
+      expect { KeycloakSession::Client.new.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
+
+      post "/auth/logout"
+
+      expect(response).to redirect_to("/login")
+      expect(token_sets.count).to eq(0)
+    end
+
+    it "still goes through Keycloak when the token set is already gone" do
+      fake_keycloak.logout_page = true
+      token_sets.delete_all
+
+      post "/auth/logout"
+
+      expect(response.location).to include("/protocol/openid-connect/logout?")
+      expect(response.location).not_to include("id_token_hint")
     end
 
     it "refuses a sign-out without a CSRF token" do
