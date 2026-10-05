@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 Run `bin/rails keycloak_session:install:migrations db:migrate` after upgrading.
 
 - Signing out redirects the browser to Keycloak's logout page (RP-initiated
