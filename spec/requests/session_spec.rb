@@ -1,0 +1,199 @@
+# frozen_string_literal: true
+
+RSpec.describe "Keycloak session", type: :request do
+  let!(:user) { User.create!(email: "a@example.test", oidc_id: "abc") }
+  let(:token_sets) { KeycloakSession::TokenSet }
+
+  def expire_access_token
+    token_sets.last.update_columns(access_token: fake_keycloak.access_token(sub: "abc", exp: Time.now.to_i - 10))
+  end
+
+  describe "signing in" do
+    it "sends a visitor without a session to the login page" do
+      get "/"
+
+      expect(response).to redirect_to("/login")
+    end
+
+    it "signs in a user whose token carries the audience" do
+      keycloak_sign_in(sub: "abc")
+      expect(response).to redirect_to("/")
+
+      get "/"
+      expect(response.body).to eq("Hello a@example.test")
+      expect(token_sets.last).to have_attributes(user_id: user.id, subject: "abc")
+    end
+
+    it "refuses a token without the audience before resolving the user" do
+      expect(KeycloakSession.config.resolve_user).not_to receive(:call)
+
+      keycloak_sign_in(sub: "abc", aud: "account")
+
+      expect(response).to redirect_to("/login")
+      expect(token_sets.count).to eq(0)
+      follow_redirect!
+      expect(response.body).to include("Sign-in failed.")
+    end
+
+    it "refuses a subject the app does not know" do
+      keycloak_sign_in(sub: "stranger")
+
+      expect(response).to redirect_to("/login")
+      expect(token_sets.count).to eq(0)
+    end
+
+    it "refuses the login when Keycloak's keys cannot be fetched" do
+      fake_keycloak.down = true
+
+      keycloak_sign_in(sub: "abc")
+
+      expect(response).to redirect_to("/login")
+    end
+
+    it "refuses a callback without tokens" do
+      OmniAuth.config.mock_auth[:keycloak] = OmniAuth::AuthHash.new(provider: "keycloak", uid: "abc")
+
+      post "/auth/keycloak"
+      follow_redirect!
+
+      expect(response).to redirect_to("/login")
+    end
+
+    it "lands on the login page when OmniAuth reports a failure" do
+      OmniAuth.config.mock_auth[:keycloak] = :invalid_credentials
+
+      post "/auth/keycloak"
+      follow_redirect!
+      expect(response).to redirect_to(%r{/auth/failure})
+      follow_redirect!
+      expect(response).to redirect_to("/login")
+    end
+
+    it "clears out expired token sets of earlier logins" do
+      keycloak_sign_in(sub: "abc")
+      token_sets.last.update_columns(expires_at: 1.minute.ago)
+
+      expect { keycloak_sign_in(sub: "abc") }.not_to change(token_sets, :count)
+    end
+
+    it "keeps one token set per login, so two devices stay signed in" do
+      keycloak_sign_in(sub: "abc")
+
+      expect { keycloak_sign_in(sub: "abc") }.to change(token_sets, :count).from(1).to(2)
+    end
+  end
+
+  describe "an expired access token" do
+    before do
+      keycloak_sign_in(sub: "abc")
+      expire_access_token
+    end
+
+    it "keeps the visitor signed in on the tokens Keycloak hands back" do
+      fresh = fake_keycloak.access_token(sub: "abc")
+      fake_keycloak.refreshed_tokens = {access_token: fresh}
+
+      get "/"
+
+      expect(response.body).to eq("Hello a@example.test")
+      expect(token_sets.last.access_token).to eq(fresh)
+    end
+
+    it "signs the visitor out when the refresh fails" do
+      get "/"
+
+      expect(response).to redirect_to("/login")
+    end
+
+    it "signs the visitor out and drops the token set when the audience is gone" do
+      fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc", aud: "account")}
+
+      get "/"
+
+      expect(response).to redirect_to("/login")
+      expect(token_sets.count).to eq(0)
+    end
+  end
+
+  describe "signing out" do
+    before { keycloak_sign_in(sub: "abc") }
+
+    it "ends the session here and at Keycloak" do
+      refresh_token = token_sets.last.refresh_token
+
+      post "/auth/logout"
+
+      expect(response).to redirect_to("/login")
+      expect(fake_keycloak.ended_refresh_tokens).to eq([refresh_token])
+      expect(token_sets.count).to eq(0)
+      get "/"
+      expect(response).to redirect_to("/login")
+    end
+
+    it "signs the visitor out locally even when Keycloak cannot be reached" do
+      fake_keycloak.down = true
+
+      post "/auth/logout"
+
+      expect(token_sets.count).to eq(0)
+    end
+
+    it "refuses a sign-out without a CSRF token" do
+      ActionController::Base.allow_forgery_protection = true
+
+      expect { post "/auth/logout" }.to raise_error(ActionController::InvalidAuthenticityToken)
+    ensure
+      ActionController::Base.allow_forgery_protection = false
+    end
+
+    it "is a no-op for a visitor who is already signed out" do
+      post "/auth/logout"
+      post "/auth/logout"
+
+      expect(response).to redirect_to("/login")
+    end
+  end
+
+  describe "back-channel logout" do
+    before { keycloak_sign_in(sub: "abc") }
+
+    it "drops every token set of the subject" do
+      keycloak_sign_in(sub: "abc")
+
+      post "/auth/backchannel-logout", params: {logout_token: fake_keycloak.logout_token(sub: "abc")}
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Cache-Control"]).to eq("no-store")
+      expect(token_sets.count).to eq(0)
+    end
+
+    it "leaves other subjects alone" do
+      post "/auth/backchannel-logout", params: {logout_token: fake_keycloak.logout_token(sub: "someone-else")}
+
+      expect(response).to have_http_status(:ok)
+      expect(token_sets.count).to eq(1)
+    end
+
+    it "answers 400 to a validly signed token that is not a logout" do
+      post "/auth/backchannel-logout", params: {logout_token: fake_keycloak.access_token(sub: "abc")}
+
+      expect(response).to have_http_status(:bad_request)
+      expect(token_sets.count).to eq(1)
+    end
+
+    it "answers 400 to a forged token" do
+      forged = fake_keycloak.logout_token(sub: "abc", key: fake_keycloak.foreign_key)
+
+      post "/auth/backchannel-logout", params: {logout_token: forged}
+
+      expect(response).to have_http_status(:bad_request)
+      expect(token_sets.count).to eq(1)
+    end
+
+    it "answers 400 without a token" do
+      post "/auth/backchannel-logout"
+
+      expect(response).to have_http_status(:bad_request)
+    end
+  end
+end

@@ -1,0 +1,7 @@
+/.bundle/
+/pkg/
+/tmp/
+/spec/dummy/tmp/
+/spec/dummy/log/
+Gemfile.lock
+.rspec_status
