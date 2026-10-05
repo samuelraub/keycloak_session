@@ -9,11 +9,20 @@ buttons.
 ## How access is decided
 
 Every request verifies the stored access token against the realm's keys:
-signature, expiry, issuer and audience. The audience is the access gate. Give
-the client a client scope with an audience mapper that only applies to users
-holding the client's role, and Keycloak leaves the client out of `aud` for
-everyone else. Do not swap `aud` for `azp`: `azp` names the client that asked
-for the token, whoever the user is.
+signature, expiry, issuer and audience. The audience is the access gate, and
+it takes two things in Keycloak:
+
+- a client scope with an audience mapper that adds the client to `aud`, and
+- on that same client scope's *Scope* tab, the client's role as a role scope
+  mapping.
+
+The mapper itself is unconditional. The role scope mapping is what makes it
+conditional: Keycloak only applies a client scope, mappers included, to users
+holding one of its mapped roles. Without the mapping every realm user gets
+the audience and the gate is open. Nothing else may add the client to `aud`.
+
+Do not swap `aud` for `azp`: `azp` names the client that asked for the token,
+whoever the user is.
 
 An expired access token is refreshed inline. If Keycloak refuses the refresh,
 or the new token comes back without the audience, the session ends. While
