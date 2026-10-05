@@ -12,4 +12,4 @@ gem "sqlite3"
 gem "standard"
 
 # CI pins these to cover the oldest versions the apps run on.
-gem "jwt", ENV["JWT_VERSION"] if ENV["JWT_VERSION"]
+gem "jwt", ENV["JWT_VERSION"] unless ENV["JWT_VERSION"].to_s.empty?
