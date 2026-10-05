@@ -16,6 +16,9 @@ module KeycloakSession
   PROVIDER = :keycloak
   SESSION_KEY = "keycloak_session_token_set_id"
 
+  # Keycloak could not be asked. Says nothing about the token in question.
+  class Unavailable < StandardError; end
+
   class << self
     def config
       @config ||= Configuration.new

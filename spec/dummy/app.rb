@@ -29,6 +29,9 @@ KeycloakSession.configure do |config|
   config.resolve_user = ->(claims) { User.find_by(oidc_id: claims["sub"]) }
 end
 
+# Stands in for the handler of an app with a second OmniAuth provider.
+OmniAuth.config.on_failure = ->(_env) { [418, {}, ["host"]] }
+
 Dummy::Application.initialize!
 
 class User < ActiveRecord::Base

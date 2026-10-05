@@ -15,8 +15,10 @@ holding the client's role, and Keycloak leaves the client out of `aud` for
 everyone else. Do not swap `aud` for `azp`: `azp` names the client that asked
 for the token, whoever the user is.
 
-An expired access token is refreshed inline. If the refresh fails, or the new
-token comes back without the audience, the session ends.
+An expired access token is refreshed inline. If Keycloak refuses the refresh,
+or the new token comes back without the audience, the session ends. While
+Keycloak cannot be reached nobody is signed in, but the session is kept and
+works again once Keycloak is back.
 
 ## Installation
 

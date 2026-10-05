@@ -90,7 +90,7 @@ module KeycloakSession
             respond({keys: [jwk(@signing_key).export]})
           end
           stub.post("#{base}/protocol/openid-connect/token") do
-            @refreshed_tokens ? respond(@refreshed_tokens) : [400, {}, '{"error":"invalid_grant"}']
+            @refreshed_tokens ? respond(@refreshed_tokens) : respond({error: "invalid_grant"}, status: 400)
           end
           stub.post("#{base}/protocol/openid-connect/logout") do |env|
             @ended_refresh_tokens << URI.decode_www_form(env.body).to_h["refresh_token"]
@@ -130,6 +130,7 @@ module KeycloakSession
       # Call between tests.
       def reset
         fake_keycloak.reset
+        Client.new.clear_cache
         OmniAuth.config.mock_auth.delete(KeycloakSession::PROVIDER)
       end
     end

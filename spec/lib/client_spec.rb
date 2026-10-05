@@ -39,10 +39,16 @@ RSpec.describe KeycloakSession::Client do
       expect(client.refresh("old")).to be_nil
     end
 
-    it "reports a failure rather than raising when Keycloak is down" do
+    it "raises Unavailable when Keycloak is down, which is not a refusal" do
       fake_keycloak.down = true
 
-      expect(client.refresh("old")).to be_nil
+      expect { client.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
+    end
+
+    it "raises Unavailable on a server error" do
+      allow(client).to receive(:post_form).and_return(instance_double(Faraday::Response, status: 503))
+
+      expect { client.refresh("old") }.to raise_error(KeycloakSession::Unavailable)
     end
   end
 
