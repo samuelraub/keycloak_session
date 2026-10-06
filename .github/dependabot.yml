@@ -1,0 +1,25 @@
+version: 2
+
+updates:
+  - package-ecosystem: bundler
+    directory: /
+    schedule:
+      interval: weekly
+    # A gem should only move a constraint when a release falls outside it.
+    versioning-strategy: increase-if-necessary
+    ignore:
+      # Driven by the CI matrix through RAILS_VERSION.
+      - dependency-name: rails
+      # Capped on purpose, see the Gemfile.
+      - dependency-name: json
+    groups:
+      development:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
