@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-06
+
+- Allows `omniauth-rails_csrf_protection` 2.x.
+
 ## [0.2.0] - 2026-10-05
 
 Run `bin/rails keycloak_session:install:migrations db:migrate` after upgrading.

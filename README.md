@@ -33,7 +33,7 @@ works again once Keycloak is back.
 
 ```ruby
 # Gemfile
-gem "keycloak_session", github: "samuelraub/keycloak_session", tag: "v0.2.0"
+gem "keycloak_session", github: "samuelraub/keycloak_session", tag: "v0.2.1"
 ```
 
 ```sh
