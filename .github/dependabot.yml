@@ -7,6 +7,9 @@ updates:
       interval: weekly
     # A gem should only move a constraint when a release falls outside it.
     versioning-strategy: increase-if-necessary
+    # Nothing younger than a week; security updates are exempt.
+    cooldown:
+      default-days: 7
     ignore:
       # Driven by the CI matrix through RAILS_VERSION.
       - dependency-name: rails
