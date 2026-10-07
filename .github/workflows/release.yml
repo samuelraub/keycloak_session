@@ -1,59 +1,86 @@
 name: Release
 
+# Tags what main already says: the version in version.rb with its section in CHANGELOG.md.
+# Both are bumped in an ordinary pull request first; nothing is committed here.
+
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Version to release, without the v (e.g. 0.3.0)
-        required: true
-        type: string
+      dry_run:
+        description: Only check that main is ready to be released
+        required: false
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+
+env:
+  VERSION_FILE: lib/keycloak_session/version.rb
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
-
-  release:
-    needs: ci
+  verify:
     runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ inputs.version }}
-      GH_TOKEN: ${{ github.token }}
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Check the request
+        with:
+          # To compare with the tags.
+          fetch-depth: 0
+      - id: check
         run: |
           fail() { echo "::error::$1"; exit 1; }
           [[ "$GITHUB_REF" == refs/heads/main ]] || fail "Releases are cut from main."
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "'$VERSION' is not a version like 0.3.0."
-          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
-            fail "v$VERSION is already tagged."
+
+          version="$(sed -n 's/.*VERSION = "\(.*\)".*/\1/p' "$VERSION_FILE")"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "'$version' in $VERSION_FILE is not a version like 0.3.0."
+
+          if git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
+            fail "v$version is already released. Bump $VERSION_FILE and CHANGELOG.md in a pull request first."
+          fi
+          last="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)"
+          if [[ -n "$last" && "$(printf '%s\n' "${last#v}" "$version" | sort -V | tail -n1)" != "$version" ]]; then
+            fail "$version is not newer than $last."
           fi
 
-      - name: Bump the version
-        run: |
-          # The release notes are whatever sits under [Unreleased].
-          awk '/^## \[/ { on = /Unreleased/; next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            echo "::error::Nothing under [Unreleased] in CHANGELOG.md."
-            exit 1
+          section() { awk -v want="$1" '/^## \[/ { on = index($0, "## [" want "]") == 1; next } on' CHANGELOG.md; }
+          section "$version" | grep -q '[^[:space:]]' || fail "CHANGELOG.md has nothing under [$version]."
+          if section Unreleased | grep -q '[^[:space:]]'; then
+            fail "CHANGELOG.md still has entries under [Unreleased]; they belong under [$version]."
           fi
+          grep -q "tag: \"v$version\"" README.md || fail "The README does not install tag v$version."
 
-          TODAY=$(date -u +%F) perl -pi -e \
-            's/^## \[Unreleased\]$/## [Unreleased]\n\n## [$ENV{VERSION}] - $ENV{TODAY}/' CHANGELOG.md
-          perl -pi -e 's/VERSION = "\K[^"]+/$ENV{VERSION}/' lib/keycloak_session/version.rb
-          perl -pi -e 's/tag: "v\K[^"]+/$ENV{VERSION}/' README.md
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "Ready to release **v$version** at $(git log -1 --format='%h %s')"
+            echo
+            section "$version"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish
+  ci:
+    name: checks on the commit
+    needs: verify
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: [verify, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag and publish the release
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore: release $VERSION"
-          git tag -a "v$VERSION" -m "v$VERSION"
-          git push --atomic origin main "v$VERSION"
-          gh release create "v$VERSION" --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          awk -v want="$VERSION" '/^## \[/ { on = index($0, "## [" want "]") == 1; next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "Released **v$VERSION**" >> "$GITHUB_STEP_SUMMARY"

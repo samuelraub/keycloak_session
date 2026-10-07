@@ -33,10 +33,16 @@ purpose; the comment there says why).
 
 ## Releasing
 
-Releases are cut by the `Release` workflow (`workflow_dispatch` with the version). It runs CI,
-moves the notes under `[Unreleased]` in `CHANGELOG.md` to the new version, bumps
-`lib/keycloak_session/version.rb` and the tag in the README, commits, tags and creates the
-GitHub release. So every change that users will notice needs a line under `[Unreleased]`, and
-nothing else about a release is done by hand.
+A release has two steps, because `main` only changes through pull requests:
+
+1. A pull request that makes `main` say the new version: `VERSION` in
+   `lib/keycloak_session/version.rb`, the entries under `[Unreleased]` in `CHANGELOG.md` moved
+   under a `## [x.y.z] - date` heading (leaving `[Unreleased]` empty), and the `tag:` line in the
+   README.
+2. The `Release` workflow (`workflow_dispatch` on `main`). It checks those three against each
+   other and against the existing tags, runs CI, then creates the tag `vx.y.z` and a GitHub
+   release with that changelog section as notes. It commits nothing; `dry_run` only checks.
+
+So every change that users will notice needs a line under `[Unreleased]` when it is made.
 
 Commit messages follow Conventional Commits.
