@@ -23,10 +23,13 @@ RAILS_VERSION="~> 8.1.0" bundle update && bundle exec rake spec       # another 
 
 ## Supported versions
 
-The CI matrix in `.github/workflows/ci.yml` is the statement of what is supported: three
-Ruby/Rails pairs, the oldest of them with the oldest `jwt`. `RAILS_VERSION` and `JWT_VERSION`
-select them through the `Gemfile`. When a constraint in the gemspec moves, move the matrix
-with it.
+The CI matrix in `.github/workflows/ci.yml` is what is tested: two Ruby/Rails pairs, the older
+of them with the oldest `jwt`. `RAILS_VERSION` and `JWT_VERSION` select them through the
+`Gemfile`. Only versions that still get security fixes are in it.
+
+The gemspec is more generous than the matrix: it still allows Ruby 3.2 and Rails 7.1, which are
+end of life and no longer tested. Raising those floors changes what users can install, so it
+needs a changelog entry and a release; until then, nothing promises that the gem works there.
 
 Dependabot ignores `rails` (the matrix drives it) and `json` (capped in the `Gemfile` on
 purpose; the comment there says why).
