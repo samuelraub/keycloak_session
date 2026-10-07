@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Advisories and new releases of unlocked dependencies appear without a push.
+  schedule:
+    - cron: "41 5 * * 1"
+  # The release workflow runs this first.
+  workflow_call:
 
 jobs:
   test:
@@ -42,3 +47,14 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
       - run: bundle exec rake standard
+
+  # The one check branch protection requires, so the matrix can change.
+  ci:
+    if: always()
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs passed
+        run: |
+          echo '${{ toJSON(needs.*.result) }}'
+          ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
