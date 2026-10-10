@@ -27,6 +27,10 @@ module KeycloakSession
     # user and the return path, which may be nil, and decides alone.
     attr_accessor :after_login_path
 
+    # True sends a signed-out visitor to the login page with the page they asked for as
+    # `return_to`. The login page has to hand it on to the sign-in button.
+    attr_accessor :return_to_requested_page
+
     # A Faraday connection, for tests. Nil builds one with timeouts.
     attr_accessor :connection
 
@@ -37,6 +41,7 @@ module KeycloakSession
       @encrypt_tokens = false
       @login_path = "/login"
       @after_login_path = "/"
+      @return_to_requested_page = false
     end
 
     # Keycloak only puts the client into `aud` for users allowed to use it (audience mapper on

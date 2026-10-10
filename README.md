@@ -86,17 +86,16 @@ field. After the callback the visitor is redirected there instead of to
 
 When the sign-in fails, for whatever reason, the visitor comes back to
 `login_path` with the same `return_to` in the query, so the page can render
-its button for that page again. Getting the parameter there in the first
-place is the app's part, as is sending on a visitor who is signed in already,
-for example in another tab:
+its button for that page again. With `return_to_requested_page` the parameter gets there in the first place:
+`require_login` sends a signed-out visitor to `login_path` with the page they
+asked for. That holds for GET requests that are neither XHR nor for a Turbo
+frame; anything else is nothing to come back to and goes to the bare
+`login_path`. It is off by default, because the login page has to play along:
+render the button with the parameter, and send on a visitor who is signed in
+already, for example in another tab:
 
 ```ruby
-def request_login
-  # Only a page can be returned to: the redirect after the sign-in is a GET.
-  return super unless request.get?
-
-  redirect_to "/login?#{{return_to: request.fullpath}.to_query}"
-end
+config.return_to_requested_page = true
 
 # SessionsController
 def new
@@ -137,6 +136,7 @@ has_many :keycloak_token_sets, class_name: "KeycloakSession::TokenSet", dependen
 | `user_class` | `"User"` | |
 | `login_path` | `"/login"` | Where signed-out visitors go. |
 | `after_login_path` | `"/"` | Where a sign-in without `return_to` ends. A proc runs in the controller, is given the user and the return path (or nil), and decides alone. |
+| `return_to_requested_page` | `false` | True sends signed-out visitors to `login_path` with the page they asked for as `return_to`, see above. |
 | `enabled` | `true` | False leaves the provider out of the middleware stack. |
 | `encrypt_tokens` | `false` | Encrypts the stored tokens, see below. |
 

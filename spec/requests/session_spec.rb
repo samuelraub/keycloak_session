@@ -15,6 +15,42 @@ RSpec.describe "Keycloak session", type: :request do
       expect(response).to redirect_to("/login")
     end
 
+    context "with return_to_requested_page" do
+      before { allow(KeycloakSession.config).to receive(:return_to_requested_page).and_return(true) }
+
+      it "sends the visitor to the login page with the page they asked for" do
+        get "/?page=2&q=a%20b"
+
+        expect(response).to redirect_to("/login?return_to=%2F%3Fpage%3D2%26q%3Da%2520b")
+      end
+
+      it "returns to that page after the sign-in" do
+        get "/?page=2"
+        return_to = Rack::Utils.parse_query(URI(response.location).query)["return_to"]
+
+        keycloak_sign_in(sub: "abc", return_to: return_to)
+
+        expect(response).to redirect_to("/?page=2")
+      end
+
+      it "leaves out what is not a page: the redirect after the sign-in is a GET" do
+        post "/"
+        expect(response).to redirect_to("/login")
+
+        get "/", xhr: true
+        expect(response).to redirect_to("/login")
+
+        get "/", headers: {"Turbo-Frame" => "invoices"}
+        expect(response).to redirect_to("/login")
+      end
+
+      it "leaves out a page whose path is too long to carry" do
+        get "/?q=#{"a" * 2000}"
+
+        expect(response).to redirect_to("/login")
+      end
+    end
+
     it "signs in a user whose token carries the audience" do
       keycloak_sign_in(sub: "abc")
       expect(response).to redirect_to("/")

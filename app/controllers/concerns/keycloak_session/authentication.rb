@@ -25,7 +25,8 @@ module KeycloakSession
     end
 
     def request_login
-      redirect_to KeycloakSession.config.login_path
+      config = KeycloakSession.config
+      redirect_to ReturnPath.login_path((ReturnPath.requested(request) if config.return_to_requested_page))
     end
 
     private
