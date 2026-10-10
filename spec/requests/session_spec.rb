@@ -89,6 +89,151 @@ RSpec.describe "Keycloak session", type: :request do
     end
   end
 
+  describe "returning to the page the visitor asked for" do
+    def failed_sign_in(return_to)
+      OmniAuth.config.mock_auth[:keycloak] = :invalid_credentials
+      post "/auth/keycloak", params: {return_to: return_to}
+      follow_redirect!
+      follow_redirect!
+    end
+
+    it "redirects there after the callback" do
+      mock_keycloak_login(sub: "abc")
+
+      post "/auth/keycloak?return_to=%2Finvoices%3Fpage%3D2"
+      follow_redirect!
+
+      expect(response).to redirect_to("/invoices?page=2")
+      get "/"
+      expect(response.body).to eq("Hello a@example.test")
+    end
+
+    it "takes the path from a form field as well, as the test helper sends it" do
+      keycloak_sign_in(sub: "abc", return_to: "/invoices")
+
+      expect(response).to redirect_to("/invoices")
+    end
+
+    ["//evil.example", "/\\evil.example", "https://evil.example/", "javascript:alert(1)", "invoices",
+      "/\t/evil.example"].each do |unsafe|
+      it "refuses #{unsafe.inspect}" do
+        keycloak_sign_in(sub: "abc", return_to: unsafe)
+
+        expect(response).to redirect_to("/")
+      end
+    end
+
+    it "refuses a path that is not a string" do
+      mock_keycloak_login(sub: "abc")
+
+      post "/auth/keycloak?return_to[]=%2Finvoices"
+      follow_redirect!
+
+      expect(response).to redirect_to("/")
+    end
+
+    it "keeps the path on the way back to the login page when OmniAuth reports a failure" do
+      failed_sign_in("/invoices?page=2")
+
+      expect(response).to redirect_to("/login?return_to=%2Finvoices%3Fpage%3D2")
+    end
+
+    it "keeps the path when the callback refuses the user" do
+      keycloak_sign_in(sub: "stranger", return_to: "/invoices")
+
+      expect(response).to redirect_to("/login?return_to=%2Finvoices")
+    end
+
+    it "keeps the path when Keycloak's keys cannot be fetched" do
+      fake_keycloak.down = true
+
+      keycloak_sign_in(sub: "abc", return_to: "/invoices")
+
+      expect(response).to redirect_to("/login?return_to=%2Finvoices")
+    end
+
+    it "appends the path to a login path that has a query of its own" do
+      allow(KeycloakSession.config).to receive(:login_path).and_return("/login?via=keycloak")
+
+      failed_sign_in("/invoices")
+
+      expect(response).to redirect_to("/login?via=keycloak&return_to=%2Finvoices")
+    end
+
+    context "with forgery protection" do
+      around do |example|
+        ActionController::Base.allow_forgery_protection = true
+        example.run
+      ensure
+        ActionController::Base.allow_forgery_protection = false
+      end
+
+      it "keeps the page of a second tab whose button went stale when the first one signed in" do
+        get "/login?return_to=%2Fb"
+        token = response.headers["X-CSRF-Token"]
+        mock_keycloak_login(sub: "abc")
+        post "/auth/keycloak?return_to=%2Fa", params: {authenticity_token: token}
+        follow_redirect!
+        expect(response).to redirect_to("/a")
+
+        post "/auth/keycloak?return_to=%2Fb", params: {authenticity_token: token}
+        expect(response.location).to include("/auth/failure?message=ActionController%3A%3AInvalidAuthenticityToken")
+        follow_redirect!
+
+        expect(response).to redirect_to("/login?return_to=%2Fb")
+        expect(session.to_h).not_to include(KeycloakSession::ReturnPath::SESSION_KEY)
+        # Still the first tab's session: the host's login page sends a signed-in visitor on.
+        get "/"
+        expect(response.body).to eq("Hello a@example.test")
+      end
+    end
+
+    it "forgets the path of a failed attempt" do
+      failed_sign_in("/old")
+      expect(session.to_h).not_to include(KeycloakSession::ReturnPath::SESSION_KEY)
+
+      keycloak_sign_in(sub: "abc")
+
+      expect(response).to redirect_to("/")
+    end
+
+    it "forgets the path of an attempt that was abandoned at Keycloak" do
+      post "/auth/keycloak?return_to=%2Fold"
+
+      keycloak_sign_in(sub: "abc")
+
+      expect(response).to redirect_to("/")
+    end
+
+    it "drops a path too long for the session cookie instead of failing" do
+      long = "/invoices?q=#{"a" * 5000}"
+      mock_keycloak_login(sub: "abc")
+
+      post "/auth/keycloak", params: {return_to: long},
+        headers: {"Referer" => "http://www.example.com/login?return_to=#{CGI.escape(long)}"}
+      follow_redirect!
+
+      expect(response).to redirect_to("/")
+    end
+
+    it "carries the longest path it accepts through a failure" do
+      longest = "/#{"a" * (KeycloakSession::ReturnPath::MAX_BYTES - 1)}"
+
+      failed_sign_in(longest)
+
+      expect(response).to redirect_to("/login?return_to=#{CGI.escape(longest)}")
+    end
+
+    it "lets a callable after_login_path decide, given the user and the path" do
+      allow(KeycloakSession.config).to receive(:after_login_path)
+        .and_return(->(user, return_to) { "/welcome?email=#{user.email}&then=#{return_to}" })
+
+      keycloak_sign_in(sub: "abc", return_to: "/invoices")
+
+      expect(response).to redirect_to("/welcome?email=a@example.test&then=/invoices")
+    end
+  end
+
   describe "an expired access token" do
     before do
       keycloak_sign_in(sub: "abc")

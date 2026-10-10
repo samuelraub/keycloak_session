@@ -54,6 +54,7 @@ class PagesController < ApplicationController
   end
 
   def login
+    response.headers["X-CSRF-Token"] = form_authenticity_token
     render plain: "Login #{flash[:alert]}"
   end
 end

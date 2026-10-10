@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- `POST /auth/keycloak` takes a `return_to`, in the query or as a form field.
+  After the callback the visitor is redirected there instead of to
+  `after_login_path`. Only a local path of at most 1024 bytes is accepted
+  (`KeycloakSession::ReturnPath.safe`); anything else is dropped.
+- A failed sign-in redirects to `login_path` with that `return_to` in the
+  query, whether OmniAuth reports the failure or the callback refuses the
+  user. Without a `return_to` the redirects are the ones they were.
+- `after_login_path` may be a callable. It is called with the user and the
+  return path, which may be nil, and its result is where the visitor goes.
+- `keycloak_sign_in` takes `return_to:`.
+- OmniAuth no longer stores the `Referer` of the sign-in click in the session
+  (`omniauth.origin`), and the failure redirect no longer carries `origin`.
+  The gem never used it, and a long one raised `CookieOverflow` on a cookie
+  session.
+
 ## [0.2.1] - 2026-10-06
 
 - Allows `omniauth-rails_csrf_protection` 2.x.

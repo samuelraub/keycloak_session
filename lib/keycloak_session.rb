@@ -8,6 +8,7 @@ require "omniauth/rails_csrf_protection"
 
 require "keycloak_session/version"
 require "keycloak_session/configuration"
+require "keycloak_session/return_path"
 require "keycloak_session/client"
 require "keycloak_session/verifier"
 require "keycloak_session/engine"

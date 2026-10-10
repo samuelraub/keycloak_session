@@ -21,7 +21,11 @@ module KeycloakSession
     # Called with the verified access token claims; returns the user to sign in, or nil to refuse.
     attr_accessor :resolve_user
 
-    attr_accessor :login_path, :after_login_path
+    attr_accessor :login_path
+
+    # Where a sign-in without a `return_to` ends. A callable is given the user and the return
+    # path, which may be nil, and decides alone.
+    attr_accessor :after_login_path
 
     # A Faraday connection, for tests. Nil builds one with timeouts.
     attr_accessor :connection

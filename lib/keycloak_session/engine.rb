@@ -25,6 +25,9 @@ module KeycloakSession
           issuer: config.issuer,
           discovery: true,
           pkce: true,
+          # The Referer is of no use here, and with a long query it overflows a cookie session.
+          origin_param: false,
+          setup: ->(env) { ReturnPath.remember(env) if env["omniauth.strategy"].on_request_path? },
           scope: config.scopes.map(&:to_sym),
           client_options: {
             scheme: issuer.scheme,
