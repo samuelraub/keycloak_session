@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-10
+
 - `POST /auth/keycloak` takes a `return_to`, in the query or as a form field.
   After the callback the visitor is redirected there instead of to
   `after_login_path`. Only a local path that parses as a URI and takes at
