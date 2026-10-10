@@ -80,15 +80,17 @@ module KeycloakSession
 
     def after_login_path(user)
       path = settings.after_login_path
-      path.respond_to?(:call) ? path.call(user, @return_to) : @return_to || path
+      # In the controller, where redirect_to evaluated a proc before it was given arguments.
+      path.is_a?(Proc) ? instance_exec(user, @return_to, &path) : @return_to || path
     end
 
     # With the path, so the login page can offer its button for that page again.
     def login_path
-      path = settings.login_path
-      return path unless @return_to
+      return settings.login_path unless @return_to
 
-      "#{path}#{path.include?("?") ? "&" : "?"}#{{ReturnPath::PARAM => @return_to}.to_query}"
+      uri = URI(settings.login_path)
+      uri.query = [uri.query, {ReturnPath::PARAM => @return_to}.to_query].compact.join("&")
+      uri.to_s
     end
 
     def refuse

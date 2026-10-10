@@ -92,6 +92,9 @@ for example in another tab:
 
 ```ruby
 def request_login
+  # Only a page can be returned to: the redirect after the sign-in is a GET.
+  return super unless request.get?
+
   redirect_to "/login?#{{return_to: request.fullpath}.to_query}"
 end
 
@@ -104,7 +107,9 @@ end
 
 `return_to` is the visitor's to write. Only a path of the app is accepted: it
 starts with a `/` that neither a second `/` nor a `\` follows, has no control
-characters, and is at most 1024 bytes long. Anything else is dropped and the
+characters, parses as a URI, and takes at most 1024 bytes in the session.
+Pass the path as the request had it (`request.fullpath`), percent-encoded: a
+space or an unescaped `ü` does not parse. Anything else is dropped and the
 sign-in goes on without it. `KeycloakSession::ReturnPath.safe` applies the
 same rule and returns the path or nil.
 
@@ -131,7 +136,7 @@ has_many :keycloak_token_sets, class_name: "KeycloakSession::TokenSet", dependen
 | `scopes` | `openid email profile` | |
 | `user_class` | `"User"` | |
 | `login_path` | `"/login"` | Where signed-out visitors go. |
-| `after_login_path` | `"/"` | Where a sign-in without `return_to` ends. A callable is called with the user and the return path (or nil) and decides alone. |
+| `after_login_path` | `"/"` | Where a sign-in without `return_to` ends. A proc runs in the controller, is given the user and the return path (or nil), and decides alone. |
 | `enabled` | `true` | False leaves the provider out of the middleware stack. |
 | `encrypt_tokens` | `false` | Encrypts the stored tokens, see below. |
 
