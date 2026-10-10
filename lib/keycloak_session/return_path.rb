@@ -36,6 +36,23 @@ module KeycloakSession
       def take(session)
         safe(session.delete(SESSION_KEY))
       end
+
+      # The login path, with the path in its query when there is one.
+      def login_path(path, config: KeycloakSession.config)
+        return config.login_path unless path
+
+        uri = URI(config.login_path)
+        uri.query = [uri.query, {PARAM => path}.to_query].compact.join("&")
+        uri.to_s
+      end
+
+      # The page a signed-out request asked for, or nil when it is nothing to come back to
+      # with a GET, or a fragment of a page.
+      def requested(request)
+        return unless request.get? && !request.xhr? && request.headers["Turbo-Frame"].blank?
+
+        safe(request.fullpath)
+      end
     end
   end
 end

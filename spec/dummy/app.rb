@@ -62,5 +62,6 @@ end
 Dummy::Application.routes.draw do
   mount KeycloakSession::Engine, at: "/auth"
   root to: "pages#home"
+  post "/", to: "pages#home"
   get "login", to: "pages#login"
 end

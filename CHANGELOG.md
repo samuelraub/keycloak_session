@@ -13,6 +13,9 @@
 - A proc as `after_login_path` is given the user and the return path, which
   may be nil, and its result is where the visitor goes. It still runs in the
   controller, as it did when `redirect_to` evaluated it.
+- `return_to_requested_page`, off by default, has `require_login` send a
+  signed-out visitor to `login_path` with the page they asked for as
+  `return_to`, for GET requests that are neither XHR nor for a Turbo frame.
 - `keycloak_sign_in` takes `return_to:`.
 - OmniAuth no longer stores the `Referer` of the sign-in click in the session
   (`omniauth.origin`), and the failure redirect no longer carries `origin`.

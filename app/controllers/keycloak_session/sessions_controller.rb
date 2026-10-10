@@ -85,16 +85,8 @@ module KeycloakSession
     end
 
     # With the path, so the login page can offer its button for that page again.
-    def login_path
-      return settings.login_path unless @return_to
-
-      uri = URI(settings.login_path)
-      uri.query = [uri.query, {ReturnPath::PARAM => @return_to}.to_query].compact.join("&")
-      uri.to_s
-    end
-
     def refuse
-      redirect_to login_path, alert: I18n.t("keycloak_session.login_failed", default: "Sign-in failed.")
+      redirect_to ReturnPath.login_path(@return_to), alert: I18n.t("keycloak_session.login_failed", default: "Sign-in failed.")
     end
   end
 end
