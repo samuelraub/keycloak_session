@@ -4,13 +4,15 @@
 
 - `POST /auth/keycloak` takes a `return_to`, in the query or as a form field.
   After the callback the visitor is redirected there instead of to
-  `after_login_path`. Only a local path of at most 1024 bytes is accepted
+  `after_login_path`. Only a local path that parses as a URI and takes at
+  most 1024 bytes in the session is accepted
   (`KeycloakSession::ReturnPath.safe`); anything else is dropped.
 - A failed sign-in redirects to `login_path` with that `return_to` in the
   query, whether OmniAuth reports the failure or the callback refuses the
   user. Without a `return_to` the redirects are the ones they were.
-- `after_login_path` may be a callable. It is called with the user and the
-  return path, which may be nil, and its result is where the visitor goes.
+- A proc as `after_login_path` is given the user and the return path, which
+  may be nil, and its result is where the visitor goes. It still runs in the
+  controller, as it did when `redirect_to` evaluated it.
 - `keycloak_sign_in` takes `return_to:`.
 - OmniAuth no longer stores the `Referer` of the sign-in click in the session
   (`omniauth.origin`), and the failure redirect no longer carries `origin`.

@@ -115,7 +115,7 @@ RSpec.describe "Keycloak session", type: :request do
     end
 
     ["//evil.example", "/\\evil.example", "https://evil.example/", "javascript:alert(1)", "invoices",
-      "/\t/evil.example"].each do |unsafe|
+      "/\t/evil.example", "/rechnungen/über sicht", "/a?x=ü", "/a b", "/100%", "/a[b]"].each do |unsafe|
       it "refuses #{unsafe.inspect}" do
         keycloak_sign_in(sub: "abc", return_to: unsafe)
 
@@ -216,8 +216,30 @@ RSpec.describe "Keycloak session", type: :request do
       expect(response).to redirect_to("/")
     end
 
+    it "measures the path as the session stores it, where an ampersand takes six bytes" do
+      keycloak_sign_in(sub: "abc", return_to: "/invoices?#{"&" * 1000}")
+
+      expect(response).to redirect_to("/")
+    end
+
+    it "appends the path ahead of a fragment in the login path" do
+      allow(KeycloakSession.config).to receive(:login_path).and_return("/app#/login")
+
+      failed_sign_in("/invoices")
+
+      expect(response).to redirect_to("/app?return_to=%2Finvoices#/login")
+    end
+
+    it "evaluates a proc after_login_path in the controller, as redirect_to did" do
+      allow(KeycloakSession.config).to receive(:after_login_path).and_return(proc { "/#{controller_name}" })
+
+      keycloak_sign_in(sub: "abc", return_to: "/invoices")
+
+      expect(response).to redirect_to("/sessions")
+    end
+
     it "carries the longest path it accepts through a failure" do
-      longest = "/#{"a" * (KeycloakSession::ReturnPath::MAX_BYTES - 1)}"
+      longest = "/#{"a" * (KeycloakSession::ReturnPath::MAX_BYTES - 3)}"
 
       failed_sign_in(longest)
 

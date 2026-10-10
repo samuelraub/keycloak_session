@@ -10,14 +10,19 @@ module KeycloakSession
     # which turns "/\t/host" into "//host".
     LOCAL = %r{\A/(?![/\\])[[:print:]]*\z}
     # The session may be a cookie of 4 kB, which the path shares with everything else in it.
+    # Counted as the session's JSON holds it, where an escaped "&" takes six bytes.
     MAX_BYTES = 1024
 
     class << self
       # The value if it is a path to send a visitor to, or nil.
       def safe(value)
-        return unless value.is_a?(String) && value.valid_encoding? && value.bytesize <= MAX_BYTES
+        return unless value.is_a?(String) && value.valid_encoding? && value.match?(LOCAL)
+        return if ActiveSupport::JSON.encode(value).bytesize > MAX_BYTES
 
-        value[LOCAL]
+        # redirect_to raises on what URI cannot parse, e.g. a space or an unescaped umlaut.
+        value if URI(value).host.nil?
+      rescue URI::Error
+        nil
       end
 
       # Takes the parameter out of the request before OmniAuth copies the query into the session,
