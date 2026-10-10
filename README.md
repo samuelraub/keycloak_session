@@ -74,6 +74,44 @@ token and Turbo off, the sign-out button posts to `/auth/logout`:
 <%= button_to "Sign out", "/auth/logout", data: {turbo: false} %>
 ```
 
+### Returning to the page a visitor asked for
+
+Hand the page to the sign-in as `return_to`, in the button's URL or as a form
+field. After the callback the visitor is redirected there instead of to
+`after_login_path`:
+
+```erb
+<%= button_to "Sign in", "/auth/keycloak", params: {return_to: @return_to}, data: {turbo: false} %>
+```
+
+When the sign-in fails, for whatever reason, the visitor comes back to
+`login_path` with the same `return_to` in the query, so the page can render
+its button for that page again. Getting the parameter there in the first
+place is the app's part, as is sending on a visitor who is signed in already,
+for example in another tab:
+
+```ruby
+def request_login
+  redirect_to "/login?#{{return_to: request.fullpath}.to_query}"
+end
+
+# SessionsController
+def new
+  @return_to = KeycloakSession::ReturnPath.safe(params[:return_to])
+  redirect_to(@return_to || root_path) if current_user
+end
+```
+
+`return_to` is the visitor's to write. Only a path of the app is accepted: it
+starts with a `/` that neither a second `/` nor a `\` follows, has no control
+characters, and is at most 1024 bytes long. Anything else is dropped and the
+sign-in goes on without it. `KeycloakSession::ReturnPath.safe` applies the
+same rule and returns the path or nil.
+
+The path lives in the session for the one attempt: the callback and every
+failure take it out, and the next click on the button replaces whatever an
+abandoned attempt left.
+
 To drop a user's logins along with the user:
 
 ```ruby
@@ -93,7 +131,7 @@ has_many :keycloak_token_sets, class_name: "KeycloakSession::TokenSet", dependen
 | `scopes` | `openid email profile` | |
 | `user_class` | `"User"` | |
 | `login_path` | `"/login"` | Where signed-out visitors go. |
-| `after_login_path` | `"/"` | |
+| `after_login_path` | `"/"` | Where a sign-in without `return_to` ends. A callable is called with the user and the return path (or nil) and decides alone. |
 | `enabled` | `true` | False leaves the provider out of the middleware stack. |
 | `encrypt_tokens` | `false` | Encrypts the stored tokens, see below. |
 
@@ -148,12 +186,17 @@ are answered from memory.
 keycloak_sign_in(sub: user.oidc_id)                 # request tests
 mock_keycloak_login(sub: user.oidc_id)              # system tests, then click your button
 keycloak_sign_in(sub: user.oidc_id, aud: "account") # a user without access
+keycloak_sign_in(sub: user.oidc_id, return_to: "/invoices")
 
 fake_keycloak.refreshed_tokens = {access_token: fake_keycloak.access_token(sub: "abc")}
 fake_keycloak.down = true
 fake_keycloak.logout_token(sub: "abc")
 fake_keycloak.logout_page = true
 ```
+
+`keycloak_sign_in` stops at the callback's redirect, so
+`expect(response).to redirect_to("/invoices")` holds right after it. In a
+system test the button carries `return_to` itself.
 
 Signing out redirects the browser to Keycloak's logout page. The fake names
 none unless `logout_page` is set, so in tests a sign-out lands on

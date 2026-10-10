@@ -4,6 +4,8 @@ module KeycloakSession
   class SessionsController < ActionController::Base
     protect_from_forgery with: :exception
     skip_forgery_protection only: :backchannel_logout
+    # Before anything resets the session, and so that no outcome leaves the path behind.
+    before_action :take_return_to, only: %i[callback failure]
 
     def callback
       auth = request.env["omniauth.auth"] or return refuse
@@ -25,7 +27,7 @@ module KeycloakSession
 
       reset_session
       session[SESSION_KEY] = token_set.id
-      redirect_to settings.after_login_path
+      redirect_to after_login_path(user)
     rescue JWT::DecodeError, Unavailable => e
       settings.logger.warn("Keycloak login refused: #{e.message}")
       refuse
@@ -72,8 +74,25 @@ module KeycloakSession
       sub.present? ? scope.or(TokenSet.where(sid: nil, subject: sub)) : scope
     end
 
+    def take_return_to
+      @return_to = ReturnPath.take(session)
+    end
+
+    def after_login_path(user)
+      path = settings.after_login_path
+      path.respond_to?(:call) ? path.call(user, @return_to) : @return_to || path
+    end
+
+    # With the path, so the login page can offer its button for that page again.
+    def login_path
+      path = settings.login_path
+      return path unless @return_to
+
+      "#{path}#{path.include?("?") ? "&" : "?"}#{{ReturnPath::PARAM => @return_to}.to_query}"
+    end
+
     def refuse
-      redirect_to settings.login_path, alert: I18n.t("keycloak_session.login_failed", default: "Sign-in failed.")
+      redirect_to login_path, alert: I18n.t("keycloak_session.login_failed", default: "Sign-in failed.")
     end
   end
 end

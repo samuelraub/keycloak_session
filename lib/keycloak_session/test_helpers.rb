@@ -169,10 +169,10 @@ module KeycloakSession
       )
     end
 
-    # For request and integration tests.
-    def keycloak_sign_in(**)
+    # For request and integration tests. Ends on the redirect to `return_to` or `after_login_path`.
+    def keycloak_sign_in(return_to: nil, **)
       mock_keycloak_login(**)
-      post "/auth/keycloak"
+      post "/auth/keycloak", params: {return_to: return_to}.compact
       follow_redirect!
     end
   end
