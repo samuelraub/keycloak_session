@@ -23,8 +23,8 @@ RAILS_VERSION="~> 8.1.0" bundle update && bundle exec rake spec       # another 
 
 ## Supported versions
 
-The CI matrix in `.github/workflows/ci.yml` is what is tested: two Ruby/Rails pairs, the older
-of them with the oldest `jwt`. `RAILS_VERSION` and `JWT_VERSION` select them through the
+The CI matrix in `.github/workflows/ci.yml` is what is tested: Rails 8.1 on two Rubies, the
+older of them with the oldest `jwt`. `RAILS_VERSION` and `JWT_VERSION` select them through the
 `Gemfile`. Only versions that still get security fixes are in it.
 
 The gemspec is more generous than the matrix: it still allows Ruby 3.2 and Rails 7.1, which are

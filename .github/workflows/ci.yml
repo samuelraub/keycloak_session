@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - ruby: "3.3"
-            rails: "~> 8.0.0"
+            rails: "~> 8.1.0"
             jwt: "~> 2.7.0"
           - ruby: "4.0"
             rails: "~> 8.1.0"
