@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Requires Ruby 3.3 and Rails 8.0 or newer. Ruby 3.2 and Rails 7.1 and 7.2 are
+  end of life and were no longer tested.
+
 ## [0.3.0] - 2026-10-10
 
 - `POST /auth/keycloak` takes a `return_to`, in the query or as a form field.
