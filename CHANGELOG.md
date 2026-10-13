@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-13
+
 - Requires Ruby 3.3 and Rails 8.0 or newer. Ruby 3.2 and Rails 7.1 and 7.2 are
   end of life and were no longer tested.
 
