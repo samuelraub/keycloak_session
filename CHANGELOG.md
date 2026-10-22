@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-22
+
 - Requires Rails 8.1 or newer. Rails 8.0 gets no security fixes after
   2026-11-07.
 
