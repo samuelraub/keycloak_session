@@ -13,8 +13,6 @@ updates:
     ignore:
       # Driven by the CI matrix through RAILS_VERSION.
       - dependency-name: rails
-      # Capped on purpose, see the Gemfile.
-      - dependency-name: json
     groups:
       development:
         dependency-type: development

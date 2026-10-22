@@ -27,12 +27,11 @@ The CI matrix in `.github/workflows/ci.yml` is what is tested: Rails 8.1 on two 
 older of them with the oldest `jwt`. `RAILS_VERSION` and `JWT_VERSION` select them through the
 `Gemfile`. Only versions that still get security fixes are in it.
 
-The gemspec requires Ruby 3.3 and Rails 8.0 or newer. Where it allows more than the matrix
+The gemspec requires Ruby 3.3 and Rails 8.1 or newer. Where it allows more than the matrix
 tests, nothing promises that the gem works there. Raising a floor changes what users can
 install, so it needs a changelog entry and a release.
 
-Dependabot ignores `rails` (the matrix drives it) and `json` (capped in the `Gemfile` on
-purpose; the comment there says why).
+Dependabot ignores `rails`: the matrix drives it.
 
 ## Releasing
 
