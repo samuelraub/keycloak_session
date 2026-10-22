@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Requires Rails 8.1 or newer. Rails 8.0 gets no security fixes after
+  2026-11-07.
+
 ## [0.4.0] - 2026-10-13
 
 - Requires Ruby 3.3 and Rails 8.0 or newer. Ruby 3.2 and Rails 7.1 and 7.2 are
